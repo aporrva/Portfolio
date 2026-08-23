@@ -88,9 +88,9 @@ type DriveRuntime = {
 
 type DriveRef = { current: DriveRuntime };
 
-const MAX_LANE_OFFSET = 1.28;
-const ROUTE_TOP_SPEED = 10.5;
-const CRUISE_SPEED = 0.22;
+const MAX_LANE_OFFSET = 1.75;
+const ROUTE_TOP_SPEED = 13.8;
+const CRUISE_SPEED = 0.24;
 const AIM_CRAWL_SPEED = 0.20;
 const TARGET_LOCK_DISTANCE = 12.0;
 const RIDE_START_DISTANCE = 25;
@@ -1525,7 +1525,7 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     const keyboardSteer = controlMode ? (runtime.left ? 1 : 0) - (runtime.right ? 1 : 0) : 0;
     const pointerSteer = controller.mode === 'riding' || controller.mode === 'summit' ? -runtime.pointerX * 0.72 : 0;
     const desiredSteer = THREE.MathUtils.clamp(keyboardSteer + pointerSteer, -1, 1);
-    runtime.steer = THREE.MathUtils.damp(runtime.steer, desiredSteer, 6.5, delta);
+    runtime.steer = THREE.MathUtils.damp(runtime.steer, desiredSteer, 9.5, delta);
 
     runtime.gestureThrottle = THREE.MathUtils.damp(runtime.gestureThrottle, 0, 2.8, delta);
     const heldThrottle = controlMode && (runtime.forward || runtime.mouseThrottle) ? 1 : 0;
@@ -1574,7 +1574,7 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
 
     const timeScale = movingMode ? controller.speed : 0;
     if (movingMode) {
-      const lateralSpeed = runtime.velocity * THREE.MathUtils.lerp(1.2, 2, runtime.velocity);
+      const lateralSpeed = THREE.MathUtils.lerp(2.2, 4.2, runtime.velocity);
       runtime.lane = THREE.MathUtils.clamp(
         runtime.lane + runtime.steer * lateralSpeed * delta * timeScale,
         -MAX_LANE_OFFSET,
@@ -2264,7 +2264,7 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
     <div className="route-rail" aria-label={'Route progress: ' + controller.completedCount + ' of ' + PORTFOLIO_STOPS.length}>
       <span>ROUTE</span><span className="route-count">{controller.completedCount} / {PORTFOLIO_STOPS.length}</span><i /><b>{routeNumber}</b><em>{routeLabel}</em>
     </div>
-    <div className="speed-cluster"><span>{playState}</span><strong>{Math.round(vehicleSpeed * 168).toString().padStart(3, '0')}</strong><small>KM/H</small></div>
+    <div className="speed-cluster"><span>{playState}</span><strong>{Math.round(vehicleSpeed * 210).toString().padStart(3, '0')}</strong><small>KM/H</small></div>
     <div className="scene-caption"><span>{mode === 'finale' ? 'HIMALAYAN OVERLOOK' : 'ALPINE REDLINE'}</span><b>{mode === 'summit' || mode === 'finale' ? 'SUMMIT ROUTE / 3D PANORAMA' : 'FULL 3D RIDE / SIX CHECKPOINTS'}</b></div>
 
     {driving && <div className="drive-pad" aria-label="Motorcycle controls">
@@ -2355,10 +2355,10 @@ export default function CinematicRide() {
       const target = event.target as HTMLElement | null;
       if (active && target?.closest('button, a, input, textarea, select, [contenteditable="true"]')) return;
       let handled = true;
-      if (event.code === 'ArrowUp' || event.code === 'KeyW') drive.current.forward = active;
-      else if (event.code === 'ArrowDown' || event.code === 'KeyS') drive.current.brake = active;
-      else if (event.code === 'ArrowLeft' || event.code === 'KeyA') drive.current.left = active;
-      else if (event.code === 'ArrowRight' || event.code === 'KeyD') drive.current.right = active;
+      if (event.code === 'ArrowUp' || event.code === 'KeyW' || event.key === 'ArrowUp' || event.key === 'w' || event.key === 'W') drive.current.forward = active;
+      else if (event.code === 'ArrowDown' || event.code === 'KeyS' || event.key === 'ArrowDown' || event.key === 's' || event.key === 'S') drive.current.brake = active;
+      else if (event.code === 'ArrowLeft' || event.code === 'KeyA' || event.key === 'ArrowLeft' || event.key === 'a' || event.key === 'A') drive.current.left = active;
+      else if (event.code === 'ArrowRight' || event.code === 'KeyD' || event.key === 'ArrowRight' || event.key === 'd' || event.key === 'D') drive.current.right = active;
       else handled = false;
       if (handled) event.preventDefault();
     };

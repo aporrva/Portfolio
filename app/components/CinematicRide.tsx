@@ -433,10 +433,10 @@ function useRideController(): RideController {
       setTargetProgress(next);
     }
 
-    if (modeRef.current === 'riding' && next > 0.02) {
+    if (modeRef.current === 'riding' && next > 0.02 && distance > 0.2) {
       transition('target');
       sound(520, 0.12, 'square', 0.026);
-    } else if (modeRef.current === 'target' && Math.abs(distance) <= TARGET_LOCK_DISTANCE) {
+    } else if (modeRef.current === 'target' && Math.abs(distance) <= TARGET_LOCK_DISTANCE && distance > 0.2) {
       setAimLocked(false);
       setTargetVulnerable(false);
       transition('aiming');
@@ -522,11 +522,12 @@ function useRideController(): RideController {
     setActiveIndex(nextActiveIndex);
     activeIndexRef.current = nextActiveIndex;
 
-    setMissMessage('TARGET MISSED — ADVANCING FORWARD');
+    setMissMessage('TARGET MISSED — FULL THROTTLE AHEAD');
     sound(115, 0.22, 'square', 0.05);
 
     transition('riding');
     setSpeed(1);
+    updateEngine(1);
 
     const nextStop = PORTFOLIO_STOPS[nextActiveIndex];
     if (nextStop) {
@@ -540,6 +541,12 @@ function useRideController(): RideController {
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     if (now - lastAttemptAt.current < 350) return;
     lastAttemptAt.current = now;
+
+    if (targetDistanceRef.current <= 0.1) {
+      registerMiss('TARGET PASSED - FRONT SHOTS ONLY');
+      bypassTarget();
+      return;
+    }
 
     const distance = Math.abs(targetDistanceRef.current);
     if (distance > TARGET_LOCK_DISTANCE + 3.0) {
@@ -1583,8 +1590,9 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       const approach = THREE.MathUtils.clamp((32 - distanceToTarget) / 22, 0, 1);
       controller.reportApproach(controller.activeIndex, approach, distanceToTarget);
 
-      // If the bike drives past the target without hitting it, advance forward smoothly without rewinding
-      if (controller.mode === 'aiming' && distanceToTarget < -4.5) {
+      // Target can only be shot from the front. The moment the bike reaches or passes the billboard (distanceToTarget <= 0.2m),
+      // immediately exit slow-mo/aiming, keep engine sound roaring, and surge forward at full throttle.
+      if ((controller.mode === 'aiming' || controller.mode === 'target') && distanceToTarget <= 0.2) {
         controller.bypassTarget();
       }
     }

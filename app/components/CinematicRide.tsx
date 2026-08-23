@@ -1318,41 +1318,8 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     aimWeight.current = THREE.MathUtils.damp(aimWeight.current, targetAimWeight, 14, delta);
 
     const timeSinceShot = shotFiredAt.current >= 0 ? clock.elapsedTime - shotFiredAt.current : 999;
-    const isLaserShooting = timeSinceShot >= 0 && timeSinceShot < 0.42;
+    const isLaserShooting = timeSinceShot >= 0 && timeSinceShot < 0.45;
     const recoilKick = Math.sin(THREE.MathUtils.clamp(timeSinceShot / 0.28, 0, 1) * Math.PI);
-
-    // Muzzle flash animation
-    if (muzzleFlash) {
-      const flashOpacity = isLaserShooting ? Math.max(0, 1 - timeSinceShot * 4.5) : 0;
-      (muzzleFlash.material as THREE.MeshBasicMaterial).opacity = flashOpacity;
-      muzzleFlash.scale.setScalar(THREE.MathUtils.lerp(2.2, 0.4, THREE.MathUtils.clamp(timeSinceShot / 0.35, 0, 1)));
-    }
-
-    // Laser tracer beam animation
-    if (tracerGroup.current && isLaserShooting && activeStop) {
-      muzzleTip.getWorldPosition(muzzleWorldPos);
-      const targetPose = getRoadsidePose(activeStop);
-      const targetWorld = targetPose.position.clone();
-      targetWorld.y += 0.05;
-
-      const beamDist = muzzleWorldPos.distanceTo(targetWorld);
-      tracerMidPos.lerpVectors(muzzleWorldPos, targetWorld, 0.5);
-
-      tracerGroup.current.visible = true;
-      tracerGroup.current.position.copy(tracerMidPos);
-      tracerGroup.current.lookAt(targetWorld);
-      tracerGroup.current.scale.set(1, 1, beamDist);
-
-      const fade = Math.max(0, 1 - timeSinceShot / 0.42);
-      if (tracerMesh.current) (tracerMesh.current.material as THREE.MeshBasicMaterial).opacity = fade * 0.95;
-      if (tracerGlowMesh.current) (tracerGlowMesh.current.material as THREE.MeshBasicMaterial).opacity = fade * 0.48;
-      if (tracerImpact.current) {
-        tracerImpact.current.position.set(0, 0, beamDist / 2);
-        (tracerImpact.current.material as THREE.MeshBasicMaterial).opacity = fade * 0.85;
-      }
-    } else {
-      if (tracerGroup.current) tracerGroup.current.visible = false;
-    }
 
     if (terminalScene) {
       // In finale, gun is holstered
@@ -1694,6 +1661,54 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     if (rearWheel) rearWheel.rotation.z = -runtime.wheelAngle;
     if (frontWheel) frontWheel.rotation.z = -runtime.wheelAngle;
 
+    // Synchronize bullet tracer and muzzle flash with the exact world position of the gun in her hand
+    if (bikeRoot.current) bikeRoot.current.updateMatrixWorld(true);
+    muzzleTip.getWorldPosition(muzzleWorldPos);
+
+    if (muzzleFlash) {
+      const flashOpacity = isLaserShooting ? Math.max(0, 1 - timeSinceShot * 4.5) : 0;
+      (muzzleFlash.material as THREE.MeshBasicMaterial).opacity = flashOpacity;
+      muzzleFlash.scale.setScalar(THREE.MathUtils.lerp(2.8, 0.4, THREE.MathUtils.clamp(timeSinceShot / 0.35, 0, 1)));
+    }
+
+    if (tracerGroup.current && isLaserShooting && activeStop) {
+      const targetPose = getRoadsidePose(activeStop);
+      const targetWorld = targetPose.position.clone();
+      targetWorld.y += 0.05;
+
+      const totalDist = muzzleWorldPos.distanceTo(targetWorld);
+      
+      // Fast bullet projectile flight (0.0s to 0.16s flight time from gun muzzle to billboard)
+      const flightProgress = THREE.MathUtils.clamp(timeSinceShot / 0.16, 0, 1);
+      const bulletHead = new THREE.Vector3().lerpVectors(muzzleWorldPos, targetWorld, flightProgress);
+      // Trail stretches behind the bullet from muzzle up to a max trail length of 7.5m
+      const trailLength = Math.min(totalDist * flightProgress, 7.5);
+      const trailStart = bulletHead.clone().addScaledVector(bulletHead.clone().sub(muzzleWorldPos).normalize(), -trailLength);
+      
+      const segmentMid = new THREE.Vector3().lerpVectors(trailStart, bulletHead, 0.5);
+      const segmentLen = Math.max(trailStart.distanceTo(bulletHead), 0.2);
+
+      tracerGroup.current.visible = true;
+      tracerGroup.current.position.copy(segmentMid);
+      tracerGroup.current.lookAt(targetWorld);
+      tracerGroup.current.scale.set(1, 1, segmentLen);
+
+      const fade = Math.max(0, 1 - timeSinceShot / 0.45);
+      if (tracerMesh.current) (tracerMesh.current.material as THREE.MeshBasicMaterial).opacity = fade * 0.98;
+      if (tracerGlowMesh.current) (tracerGlowMesh.current.material as THREE.MeshBasicMaterial).opacity = fade * 0.65;
+      
+      if (tracerImpact.current) {
+        tracerImpact.current.visible = flightProgress >= 0.75;
+        tracerImpact.current.position.copy(targetWorld);
+        const impactScale = flightProgress >= 0.75 ? THREE.MathUtils.lerp(0.5, 2.5, (timeSinceShot - 0.12) / 0.25) : 0;
+        tracerImpact.current.scale.setScalar(Math.max(0, impactScale));
+        (tracerImpact.current.material as THREE.MeshBasicMaterial).opacity = fade * (flightProgress >= 0.75 ? 0.9 : 0);
+      }
+    } else {
+      if (tracerGroup.current) tracerGroup.current.visible = false;
+      if (tracerImpact.current) tracerImpact.current.visible = false;
+    }
+
     const signFocus = activeStop
       ? getRoadsidePose(activeStop).position.clone().add(new THREE.Vector3(0, 0.25, 0))
       : point.clone().addScaledVector(tangent, 10);
@@ -1832,19 +1847,19 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       </group>
     </group>
 
-    {/* Dynamic Laser Tracer Beam fired from Gun to Target */}
+    {/* Dynamic Laser Tracer Beam fired from Gun in Girl's hand to Target */}
     <group ref={tracerGroup} visible={false}>
       <mesh ref={tracerMesh} geometry={tracerBeamGeometry}>
-        <meshBasicMaterial color="#fff3a8" transparent opacity={0.95} toneMapped={false} />
+        <meshBasicMaterial color="#ffffff" transparent opacity={0.98} toneMapped={false} />
       </mesh>
       <mesh ref={tracerGlowMesh} geometry={tracerGlowGeometry}>
-        <meshBasicMaterial color="#ff9922" transparent opacity={0.48} toneMapped={false} />
-      </mesh>
-      <mesh ref={tracerImpact} scale={1.2}>
-        <sphereGeometry args={[0.22, 16, 16]} />
-        <meshBasicMaterial color="#ffdd77" transparent opacity={0.85} toneMapped={false} />
+        <meshBasicMaterial color="#ffaa22" transparent opacity={0.65} toneMapped={false} />
       </mesh>
     </group>
+    <mesh ref={tracerImpact} visible={false}>
+      <sphereGeometry args={[0.38, 16, 16]} />
+      <meshBasicMaterial color="#ffe882" transparent opacity={0.9} toneMapped={false} />
+    </mesh>
   </>;
 }
 

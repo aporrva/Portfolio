@@ -224,9 +224,18 @@ function useRideController(): RideController {
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('keydown', onKey);
-      killTimelines();
     };
   }, [mode]);
+
+  useEffect(() => {
+    return () => {
+      mainTimeline.current?.kill();
+      approachTimeline.current?.kill();
+      if (contextRef.current && contextRef.current.state !== 'closed') {
+        void contextRef.current.close();
+      }
+    };
+  }, []);
 
   return { begin, shoot, continueRide, mute, setMute, mode, countdown, speed, targetProgress };
 }

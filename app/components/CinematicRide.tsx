@@ -514,26 +514,35 @@ function useRideController(): RideController {
     if (currentQueue.length === 0) return;
     const bypassedIndex = currentQueue[0];
 
-    // Move missed target to the end of the queue so it reappears after other targets
-    const nextQueue = [...currentQueue.slice(1), bypassedIndex];
+    // Permanently remove missed target from queue - do NOT re-queue or loop back
+    const nextQueue = currentQueue.slice(1);
     targetQueueRef.current = nextQueue;
     setTargetQueue(nextQueue);
 
-    const nextActiveIndex = nextQueue[0];
-    setActiveIndex(nextActiveIndex);
-    activeIndexRef.current = nextActiveIndex;
-
-    setMissMessage('TARGET MISSED — FULL THROTTLE AHEAD');
+    setMissMessage('TARGET PASSED — ADVANCING TO NEXT CHECKPOINT');
     sound(115, 0.22, 'square', 0.05);
 
-    transition('riding');
-    setSpeed(1);
-    updateEngine(1);
-
-    const nextStop = PORTFOLIO_STOPS[nextActiveIndex];
-    if (nextStop) {
-      const dist = Math.abs(nextStop.distance - PORTFOLIO_STOPS[bypassedIndex].distance);
-      resetChallenge(dist > 0 ? dist : 60);
+    if (nextQueue.length === 0) {
+      // All checkpoints passed, climb to Himalayan summit finale!
+      setActiveIndex(PORTFOLIO_STOPS.length);
+      activeIndexRef.current = PORTFOLIO_STOPS.length;
+      resetChallenge(SUMMIT_DISTANCE - PORTFOLIO_STOPS[bypassedIndex].distance);
+      transition('summit');
+      setSpeed(1);
+      updateEngine(1);
+      sound(132, 0.4, 'sawtooth', 0.052);
+    } else {
+      const nextActiveIndex = nextQueue[0];
+      setActiveIndex(nextActiveIndex);
+      activeIndexRef.current = nextActiveIndex;
+      transition('riding');
+      setSpeed(1);
+      updateEngine(1);
+      const nextStop = PORTFOLIO_STOPS[nextActiveIndex];
+      if (nextStop) {
+        const dist = Math.abs(nextStop.distance - PORTFOLIO_STOPS[bypassedIndex].distance);
+        resetChallenge(dist > 0 ? dist : 60);
+      }
     }
   }
 
@@ -1521,8 +1530,8 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     const controlMode = ['riding', 'target', 'aiming', 'summit'].includes(controller.mode);
     if ((controller.mode === 'shot' || controller.mode === 'reading') && !controller.previewing) runtime.targetHit = true;
 
-    const keyboardSteer = controlMode ? (runtime.left ? 1 : 0) - (runtime.right ? 1 : 0) : 0;
-    const pointerSteer = controller.mode === 'riding' || controller.mode === 'summit' ? -runtime.pointerX * 0.72 : 0;
+    const keyboardSteer = controlMode ? (runtime.right ? 1 : 0) - (runtime.left ? 1 : 0) : 0;
+    const pointerSteer = controller.mode === 'riding' || controller.mode === 'summit' ? runtime.pointerX * 0.72 : 0;
     const desiredSteer = THREE.MathUtils.clamp(keyboardSteer + pointerSteer, -1, 1);
     runtime.steer = THREE.MathUtils.damp(runtime.steer, desiredSteer, 9.5, delta);
 
@@ -1598,14 +1607,15 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       }
     }
 
-    // Seamless forward loop along the scenic mountain route if any missed targets remain to be completed
+    // Smooth continuous forward ride to summit ascent at progress >= 0.88
     if (
       runtime.progress >= 0.88
-      && controller.completedCount < PORTFOLIO_STOPS.length
       && controller.mode !== 'summit'
       && controller.mode !== 'finale'
+      && controller.mode !== 'countdown'
+      && controller.mode !== 'intro'
     ) {
-      runtime.progress = RIDE_START_PROGRESS + 0.02;
+      controller.bypassTarget();
     }
 
     if (

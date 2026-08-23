@@ -56,6 +56,7 @@ type RideController = {
   activeIndex: number;
   completedStops: number[];
   completedCount: number;
+  stopDistances: number[];
   activeStop: PortfolioStop | null;
   panelStop: PortfolioStop | null;
   previewing: boolean;
@@ -94,7 +95,7 @@ const CRUISE_SPEED = 0.24;
 const AIM_CRAWL_SPEED = 0.20;
 const TARGET_LOCK_DISTANCE = 12.0;
 const RIDE_START_DISTANCE = 25;
-const SUMMIT_DISTANCE = 625;
+const SUMMIT_DISTANCE = 880;
 
 const roadCurve = new THREE.CatmullRomCurve3([
   new THREE.Vector3(-6, 0, -100),
@@ -106,9 +107,15 @@ const roadCurve = new THREE.CatmullRomCurve3([
   new THREE.Vector3(8, 19, 220),
   new THREE.Vector3(-7, 24, 285),
   new THREE.Vector3(7, 29, 350),
-  new THREE.Vector3(-4, 33, 415),
-  new THREE.Vector3(0, 36, 475),
-  new THREE.Vector3(0, 36, 540),
+  new THREE.Vector3(-6, 34, 420),
+  new THREE.Vector3(6, 38, 490),
+  new THREE.Vector3(-5, 42, 560),
+  new THREE.Vector3(5, 46, 630),
+  new THREE.Vector3(-4, 50, 700),
+  new THREE.Vector3(4, 54, 770),
+  new THREE.Vector3(-3, 58, 840),
+  new THREE.Vector3(0, 62, 900),
+  new THREE.Vector3(0, 62, 950),
 ]);
 roadCurve.curveType = 'centripetal';
 const ROAD_LENGTH = roadCurve.getLength();
@@ -139,6 +146,17 @@ const stop = (
   groups,
   note,
 });
+
+function getEffectiveStop(index: number, distances?: number[]): PortfolioStop | null {
+  const base = PORTFOLIO_STOPS[index];
+  if (!base) return null;
+  const dist = distances && distances[index] !== undefined ? distances[index] : base.distance;
+  return {
+    ...base,
+    distance: dist,
+    progress: dist / ROAD_LENGTH,
+  };
+}
 
 const PORTFOLIO_STOPS: PortfolioStop[] = [
   stop('skills', 'SKILLS', '01', 90, 'UNLOCK THE TOOLKIT', 'SKILLS UNLOCKED', ['THE TOOLKIT', 'BEHIND THE RIDE.'], [
@@ -286,6 +304,7 @@ function useRideController(): RideController {
   const [activeIndex, setActiveIndex] = useState(0);
   const [completedStops, setCompletedStops] = useState<number[]>([]);
   const [targetQueue, setTargetQueue] = useState<number[]>([0, 1, 2, 3, 4, 5]);
+  const [stopDistances, setStopDistances] = useState<number[]>([90, 180, 270, 360, 450, 540]);
   const [panelIndex, setPanelIndex] = useState<number | null>(null);
   const [previewing, setPreviewing] = useState(false);
 
@@ -294,6 +313,7 @@ function useRideController(): RideController {
   const activeIndexRef = useRef(0);
   const completedStopsRef = useRef<number[]>([]);
   const targetQueueRef = useRef<number[]>([0, 1, 2, 3, 4, 5]);
+  const stopDistancesRef = useRef<number[]>([90, 180, 270, 360, 450, 540]);
   const previewingRef = useRef(false);
   const returnModeRef = useRef<RideState>('riding');
   const returnSpeedRef = useRef(1);
@@ -460,6 +480,9 @@ function useRideController(): RideController {
     const initialQueue = [0, 1, 2, 3, 4, 5];
     targetQueueRef.current = initialQueue;
     setTargetQueue(initialQueue);
+    const initialDistances = [90, 180, 270, 360, 450, 540];
+    stopDistancesRef.current = initialDistances;
+    setStopDistances(initialDistances);
     completedStopsRef.current = [];
     setCompletedStops([]);
     activeIndexRef.current = 0;
@@ -514,35 +537,36 @@ function useRideController(): RideController {
     if (currentQueue.length === 0) return;
     const bypassedIndex = currentQueue[0];
 
-    // Permanently remove missed target from queue - do NOT re-queue or loop back
-    const nextQueue = currentQueue.slice(1);
+    // Reschedule the missed card at the end of the route before the summit climb
+    const currentDistances = stopDistancesRef.current;
+    const maxDist = Math.max(540, ...currentQueue.map((idx) => currentDistances[idx] ?? PORTFOLIO_STOPS[idx].distance));
+    const newDistance = Math.min(SUMMIT_DISTANCE - 45, maxDist + 65);
+
+    const nextDistances = [...currentDistances];
+    nextDistances[bypassedIndex] = newDistance;
+    stopDistancesRef.current = nextDistances;
+    setStopDistances(nextDistances);
+
+    // Place missed target at the end of the queue so it reappears as a new forward card before the summit
+    const nextQueue = [...currentQueue.slice(1), bypassedIndex];
     targetQueueRef.current = nextQueue;
     setTargetQueue(nextQueue);
 
-    setMissMessage('TARGET PASSED — ADVANCING TO NEXT CHECKPOINT');
+    const nextActiveIndex = nextQueue[0];
+    setActiveIndex(nextActiveIndex);
+    activeIndexRef.current = nextActiveIndex;
+
+    setMissMessage('MISSED CARD RESCHEDULED AHEAD NEAR SUMMIT');
     sound(115, 0.22, 'square', 0.05);
 
-    if (nextQueue.length === 0) {
-      // All checkpoints passed, climb to Himalayan summit finale!
-      setActiveIndex(PORTFOLIO_STOPS.length);
-      activeIndexRef.current = PORTFOLIO_STOPS.length;
-      resetChallenge(SUMMIT_DISTANCE - PORTFOLIO_STOPS[bypassedIndex].distance);
-      transition('summit');
-      setSpeed(1);
-      updateEngine(1);
-      sound(132, 0.4, 'sawtooth', 0.052);
-    } else {
-      const nextActiveIndex = nextQueue[0];
-      setActiveIndex(nextActiveIndex);
-      activeIndexRef.current = nextActiveIndex;
-      transition('riding');
-      setSpeed(1);
-      updateEngine(1);
-      const nextStop = PORTFOLIO_STOPS[nextActiveIndex];
-      if (nextStop) {
-        const dist = Math.abs(nextStop.distance - PORTFOLIO_STOPS[bypassedIndex].distance);
-        resetChallenge(dist > 0 ? dist : 60);
-      }
+    transition('riding');
+    setSpeed(1);
+    updateEngine(1);
+
+    const nextStop = getEffectiveStop(nextActiveIndex, nextDistances);
+    if (nextStop) {
+      const dist = Math.abs(nextStop.distance - currentDistances[bypassedIndex]);
+      resetChallenge(dist > 0 ? dist : 60);
     }
   }
 
@@ -585,40 +609,14 @@ function useRideController(): RideController {
     sound(980, 0.08, 'sawtooth', 0.09);
     sound(135, 0.26, 'square', 0.095);
     window.setTimeout(() => sound(540, 0.18, 'sine', 0.04), 90);
-    const driver = { value: 1 };
-    const timeline = gsap.timeline();
-    mainTimeline.current = timeline;
-    timeline
-      .to(driver, {
-        value: 0.2,
-        duration: 0.62,
-        ease: 'power3.out',
-        onUpdate: () => setSpeed(driver.value),
-      })
-      .call(() => {
-        sound(410, 0.12, 'square', 0.04);
-        transition('reading');
-      });
+    window.setTimeout(() => {
+      transition('reading');
+    }, 720);
   }
 
   function continueRide() {
-    if (modeRef.current !== 'reading') return;
+    if (modeRef.current !== 'reading' && modeRef.current !== 'shot') return;
     killTimelines();
-    setAimLocked(false);
-    setTargetVulnerable(false);
-    setMissMessage('');
-    setMisses(0);
-
-    if (previewingRef.current) {
-      const returnMode = returnModeRef.current;
-      previewingRef.current = false;
-      setPreviewing(false);
-      setPanelIndex(null);
-      transition(returnMode);
-      setSpeed(returnSpeedRef.current);
-      return;
-    }
-
     const currentQueue = targetQueueRef.current;
     if (currentQueue.length === 0) return;
     const hitIndex = currentQueue[0];
@@ -637,17 +635,19 @@ function useRideController(): RideController {
     setPanelIndex(null);
 
     if (nextQueue.length === 0) {
-      // All 6 targets completed! Advance to summit!
+      // All targets completed! Advance to summit!
       setActiveIndex(PORTFOLIO_STOPS.length);
       activeIndexRef.current = PORTFOLIO_STOPS.length;
-      resetChallenge(SUMMIT_DISTANCE - PORTFOLIO_STOPS[hitIndex].distance);
+      resetChallenge(SUMMIT_DISTANCE - (stopDistancesRef.current[hitIndex] ?? PORTFOLIO_STOPS[hitIndex].distance));
       transition('summit');
       sound(132, 0.4, 'sawtooth', 0.052);
     } else {
       const nextIndex = nextQueue[0];
       setActiveIndex(nextIndex);
       activeIndexRef.current = nextIndex;
-      const distance = Math.abs(PORTFOLIO_STOPS[nextIndex].distance - PORTFOLIO_STOPS[hitIndex].distance);
+      const currentDist = stopDistancesRef.current[hitIndex] ?? PORTFOLIO_STOPS[hitIndex].distance;
+      const nextDist = stopDistancesRef.current[nextIndex] ?? PORTFOLIO_STOPS[nextIndex].distance;
+      const distance = Math.abs(nextDist - currentDist);
       resetChallenge(distance > 0 ? distance : 60);
       transition('riding');
       sound(105, 0.4, 'sawtooth', 0.052);
@@ -778,8 +778,9 @@ function useRideController(): RideController {
     activeIndex,
     completedStops,
     completedCount: completedStops.length,
-    activeStop: PORTFOLIO_STOPS[activeIndex] ?? null,
-    panelStop: panelIndex === null ? null : PORTFOLIO_STOPS[panelIndex],
+    stopDistances,
+    activeStop: getEffectiveStop(activeIndex, stopDistances),
+    panelStop: panelIndex === null ? null : getEffectiveStop(panelIndex, stopDistances),
     previewing,
   };
 }
@@ -2168,9 +2169,10 @@ function Scene({ controller, drive, lowQuality }: { controller: RideController; 
           ? 'active'
           : 'upcoming';
       const activeMode = index === controller.activeIndex && !controller.previewing ? controller.mode : 'riding';
+      const effectiveStop = getEffectiveStop(index, controller.stopDistances) ?? portfolioStop;
       return <RouteTarget
         key={portfolioStop.id}
-        stop={portfolioStop}
+        stop={effectiveStop}
         status={status}
         mode={activeMode}
         misses={index === controller.activeIndex ? controller.misses : 0}

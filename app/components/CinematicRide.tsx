@@ -2260,12 +2260,26 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
     <div className="speed-cluster"><span>{playState}</span><strong>{Math.round(vehicleSpeed * 210).toString().padStart(3, '0')}</strong><small>KM/H</small></div>
     <div className="scene-caption"><span>{mode === 'finale' ? 'HIMALAYAN OVERLOOK' : 'ALPINE REDLINE'}</span><b>{mode === 'summit' || mode === 'finale' ? 'SUMMIT ROUTE / 3D PANORAMA' : 'FULL 3D RIDE / SIX CHECKPOINTS'}</b></div>
 
-    {driving && <div className="drive-pad" aria-label="Motorcycle controls">
-      <span>DRIVE</span>
-      <button className="drive-up" type="button" aria-label="Accelerate" onPointerDown={(event) => { event.preventDefault(); hold('forward', true); }} onPointerUp={() => hold('forward', false)} onPointerCancel={() => hold('forward', false)} onPointerLeave={() => hold('forward', false)}>↑<i>W</i></button>
-      <button className="drive-left" type="button" aria-label="Steer left" onPointerDown={(event) => { event.preventDefault(); hold('left', true); }} onPointerUp={() => hold('left', false)} onPointerCancel={() => hold('left', false)} onPointerLeave={() => hold('left', false)}>←<i>A</i></button>
-      <button className="drive-down" type="button" aria-label="Brake" onPointerDown={(event) => { event.preventDefault(); hold('brake', true); }} onPointerUp={() => hold('brake', false)} onPointerCancel={() => hold('brake', false)} onPointerLeave={() => hold('brake', false)}>↓<i>S</i></button>
-      <button className="drive-right" type="button" aria-label="Steer right" onPointerDown={(event) => { event.preventDefault(); hold('right', true); }} onPointerUp={() => hold('right', false)} onPointerCancel={() => hold('right', false)} onPointerLeave={() => hold('right', false)}>→<i>D</i></button>
+    {driving && <div className="drive-controls-mobile" aria-label="Motorcycle drive and action controls">
+      <div className="drive-pad" aria-label="Motorcycle steering and throttle pad">
+        <span>DRIVE</span>
+        <button className="drive-up" type="button" aria-label="Accelerate" onPointerDown={(event) => { event.preventDefault(); hold('forward', true); }} onPointerUp={() => hold('forward', false)} onPointerCancel={() => hold('forward', false)} onPointerLeave={() => hold('forward', false)}>↑<i>W</i></button>
+        <button className="drive-left" type="button" aria-label="Steer left" onPointerDown={(event) => { event.preventDefault(); hold('left', true); }} onPointerUp={() => hold('left', false)} onPointerCancel={() => hold('left', false)} onPointerLeave={() => hold('left', false)}>←<i>A</i></button>
+        <button className="drive-down" type="button" aria-label="Brake" onPointerDown={(event) => { event.preventDefault(); hold('brake', true); }} onPointerUp={() => hold('brake', false)} onPointerCancel={() => hold('brake', false)} onPointerLeave={() => hold('brake', false)}>↓<i>S</i></button>
+        <button className="drive-right" type="button" aria-label="Steer right" onPointerDown={(event) => { event.preventDefault(); hold('right', true); }} onPointerUp={() => hold('right', false)} onPointerCancel={() => hold('right', false)} onPointerLeave={() => hold('right', false)}>→<i>D</i></button>
+      </div>
+
+      {(mode === 'target' || mode === 'aiming') && <div className="fire-pad" aria-label="Fire weapon at target">
+        <button
+          className={'fire-trigger-btn' + (targetVulnerable ? ' is-vulnerable' : '')}
+          type="button"
+          aria-label="Fire sidearm"
+          onClick={() => shoot(true)}
+        >
+          <span>{targetVulnerable ? 'FIRE NOW' : 'TARGET'}</span>
+          <i>🎯</i>
+        </button>
+      </div>}
     </div>}
 
     <AnimatePresence>

@@ -1131,55 +1131,61 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     const rightGlove = riderGroup.getObjectByName('Glove.001');
     const gunGroup = new THREE.Group();
     gunGroup.name = 'RiderGun';
-    gunGroup.position.set(0.1, -0.02, 0.06);
-    gunGroup.rotation.set(0.12, -0.16, 0.08);
-    gunGroup.scale.set(1.65, 1.65, 1.65);
+    gunGroup.position.set(0.12, -0.02, 0.07);
+    gunGroup.rotation.set(0.14, -0.15, 0.08);
+    gunGroup.scale.set(1.85, 1.85, 1.85);
 
     const gunBody = new THREE.Mesh(
-      new THREE.BoxGeometry(0.28, 0.13, 0.065),
-      new THREE.MeshStandardMaterial({ color: '#161a1d', metalness: 0.92, roughness: 0.2 }),
+      new THREE.BoxGeometry(0.3, 0.14, 0.07),
+      new THREE.MeshStandardMaterial({ color: '#111518', metalness: 0.94, roughness: 0.18 }),
     );
     gunBody.castShadow = true;
 
     const gunSlide = new THREE.Mesh(
-      new THREE.BoxGeometry(0.32, 0.075, 0.07),
-      new THREE.MeshStandardMaterial({ color: '#b0c4d4', metalness: 0.96, roughness: 0.15 }),
+      new THREE.BoxGeometry(0.35, 0.08, 0.076),
+      new THREE.MeshStandardMaterial({ color: '#c4d8e8', metalness: 0.98, roughness: 0.12 }),
     );
-    gunSlide.position.set(0.02, 0.075, 0);
+    gunSlide.position.set(0.02, 0.08, 0);
 
     const energyCore = new THREE.Mesh(
-      new THREE.BoxGeometry(0.15, 0.028, 0.075),
-      new THREE.MeshStandardMaterial({ color: '#ffe882', emissive: '#ffaa22', emissiveIntensity: 4.0 }),
+      new THREE.BoxGeometry(0.18, 0.032, 0.082),
+      new THREE.MeshStandardMaterial({ color: '#ffe882', emissive: '#ffaa22', emissiveIntensity: 5.0 }),
     );
-    energyCore.position.set(-0.02, 0.025, 0);
+    energyCore.position.set(-0.02, 0.028, 0);
 
     const barrel = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.028, 0.03, 0.2, 12),
-      new THREE.MeshStandardMaterial({ color: '#2a3138', metalness: 0.92, roughness: 0.22 }),
+      new THREE.CylinderGeometry(0.03, 0.032, 0.22, 12),
+      new THREE.MeshStandardMaterial({ color: '#242b32', metalness: 0.95, roughness: 0.18 }),
     );
     barrel.rotation.z = -Math.PI / 2;
-    barrel.position.set(0.24, 0.075, 0);
+    barrel.position.set(0.26, 0.08, 0);
 
     const muzzleTip = new THREE.Group();
     muzzleTip.name = 'GunMuzzleTip';
-    muzzleTip.position.set(0.35, 0.075, 0);
+    muzzleTip.position.set(0.38, 0.08, 0);
+
+    const laserDiode = new THREE.Mesh(
+      new THREE.SphereGeometry(0.025, 12, 12),
+      new THREE.MeshBasicMaterial({ color: '#ffea78', toneMapped: false }),
+    );
+    laserDiode.position.set(0.36, 0.04, 0);
 
     const muzzleFlash = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.18, 1),
+      new THREE.OctahedronGeometry(0.22, 1),
       new THREE.MeshBasicMaterial({ color: '#fff9d6', transparent: true, opacity: 0, toneMapped: false }),
     );
     muzzleFlash.name = 'GunMuzzleFlash';
-    muzzleFlash.position.set(0.35, 0.075, 0);
-    muzzleFlash.scale.set(2.6, 1.4, 1.4);
+    muzzleFlash.position.set(0.38, 0.08, 0);
+    muzzleFlash.scale.set(2.8, 1.5, 1.5);
 
     const grip = new THREE.Mesh(
-      new THREE.BoxGeometry(0.075, 0.16, 0.055),
+      new THREE.BoxGeometry(0.08, 0.17, 0.06),
       new THREE.MeshStandardMaterial({ color: '#090b0d', roughness: 0.9 }),
     );
-    grip.position.set(-0.09, -0.1, 0);
+    grip.position.set(-0.1, -0.11, 0);
     grip.rotation.z = -0.28;
 
-    gunGroup.add(gunBody, gunSlide, energyCore, barrel, muzzleTip, muzzleFlash, grip);
+    gunGroup.add(gunBody, gunSlide, energyCore, barrel, laserDiode, muzzleTip, muzzleFlash, grip);
     if (rightGlove) rightGlove.add(gunGroup);
 
     const headReveal = new THREE.Group();
@@ -1307,9 +1313,9 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     const walkProgress = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 7.8, 11.6) : 0;
 
     // Gun aiming & shooting weights
-    const isAimingMode = (controller.mode === 'aiming' || controller.mode === 'shot') && !terminalScene;
+    const isAimingMode = (controller.mode === 'target' || controller.mode === 'aiming' || controller.mode === 'shot') && !terminalScene;
     const targetAimWeight = isAimingMode ? 1 : 0;
-    aimWeight.current = THREE.MathUtils.damp(aimWeight.current, targetAimWeight, 9, delta);
+    aimWeight.current = THREE.MathUtils.damp(aimWeight.current, targetAimWeight, 14, delta);
 
     const timeSinceShot = shotFiredAt.current >= 0 ? clock.elapsedTime - shotFiredAt.current : 999;
     const isLaserShooting = timeSinceShot >= 0 && timeSinceShot < 0.42;
@@ -1456,35 +1462,35 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
         // One-handed driving + right arm dramatically raised & pointing gun towards target
         if (currentAim > 0.001) {
           if (snapshot.object.name === 'Jacket arm.001') {
-            snapshot.object.position.y += 0.42 * currentAim;
-            snapshot.object.position.z -= 0.48 * currentAim;
-            snapshot.object.position.x += 0.28 * currentAim;
-            snapshot.object.rotation.z += 0.62 * currentAim;
-            snapshot.object.rotation.y -= 0.85 * currentAim;
+            snapshot.object.position.y += 0.48 * currentAim;
+            snapshot.object.position.z -= 0.65 * currentAim;
+            snapshot.object.position.x += 0.35 * currentAim;
+            snapshot.object.rotation.z += 0.72 * currentAim;
+            snapshot.object.rotation.y -= 0.95 * currentAim;
           } else if (snapshot.object.name === 'Gloved forearm.001') {
-            snapshot.object.position.y += 0.68 * currentAim;
-            snapshot.object.position.z -= 0.92 * currentAim;
-            snapshot.object.position.x += 0.42 * currentAim;
-            snapshot.object.rotation.z += 0.52 * currentAim;
-            snapshot.object.rotation.y -= 1.05 * currentAim;
+            snapshot.object.position.y += 0.78 * currentAim;
+            snapshot.object.position.z -= 1.15 * currentAim;
+            snapshot.object.position.x += 0.55 * currentAim;
+            snapshot.object.rotation.z += 0.62 * currentAim;
+            snapshot.object.rotation.y -= 1.22 * currentAim;
           } else if (snapshot.object.name === 'Glove.001') {
-            snapshot.object.position.y += 0.78 * currentAim + (isLaserShooting ? recoilKick * 0.12 : 0);
-            snapshot.object.position.z -= 1.25 * currentAim;
-            snapshot.object.position.x += 0.55 * currentAim - (isLaserShooting ? recoilKick * 0.24 : 0);
-            snapshot.object.rotation.z += 0.42 * currentAim - (isLaserShooting ? recoilKick * 0.42 : 0);
-            snapshot.object.rotation.y -= 1.28 * currentAim;
+            snapshot.object.position.y += 0.92 * currentAim + (isLaserShooting ? recoilKick * 0.14 : 0);
+            snapshot.object.position.z -= 1.55 * currentAim;
+            snapshot.object.position.x += 0.72 * currentAim - (isLaserShooting ? recoilKick * 0.28 : 0);
+            snapshot.object.rotation.z += 0.48 * currentAim - (isLaserShooting ? recoilKick * 0.45 : 0);
+            snapshot.object.rotation.y -= 1.45 * currentAim;
           }
         }
       }
 
       // Upper torso and helmet turn towards the target when aiming
       if (torsoObj && currentAim > 0.001) {
-        torsoObj.rotation.y = -0.38 * currentAim;
-        torsoObj.rotation.z = -0.09 * currentAim;
+        torsoObj.rotation.y = -0.45 * currentAim;
+        torsoObj.rotation.z = -0.1 * currentAim;
       }
       if (helmetGroup && currentAim > 0.001) {
-        helmetGroup.rotation.y = -0.58 * currentAim;
-        helmetGroup.rotation.x = -0.1 * currentAim;
+        helmetGroup.rotation.y = -0.68 * currentAim;
+        helmetGroup.rotation.x = -0.12 * currentAim;
       }
     }
 
@@ -1651,34 +1657,31 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     runtime.hasLastPosition = true;
     runtime.wheelAngle += distanceTravelled / WHEEL_RADIUS_WORLD;
 
-    roadCurve.getTangentAt(Math.min(runtime.progress + 0.012, 1), tangentAhead).normalize();
-    const turnAngle = Math.atan2(
-      tangent.z * tangentAhead.x - tangent.x * tangentAhead.z,
-      THREE.MathUtils.clamp(tangent.dot(tangentAhead), -1, 1),
-    );
-    const curvature = turnAngle / (ROAD_LENGTH * 0.012);
-    const actualSpeed = runtime.velocity * ROUTE_TOP_SPEED * timeScale;
-    const curveLean = -Math.atan((actualSpeed * actualSpeed * curvature) / 9.81);
-    const steeringLean = runtime.steer * runtime.velocity * (0.05 + runtime.velocity * 0.12);
-    const leanTarget = terminalScene
-      ? 0.085 * parkingStand
-      : THREE.MathUtils.clamp(curveLean + steeringLean, -0.46, 0.46);
+    const lookAheadPos = runtime.progress + (8 / ROAD_LENGTH);
+    const lookAheadClamped = THREE.MathUtils.clamp(lookAheadPos, 0, 1);
+    const targetPoint = roadCurve.getPointAt(lookAheadClamped);
+    const targetTangent = roadCurve.getTangentAt(lookAheadClamped).normalize();
 
-    heading.copy(tangent).addScaledVector(side, runtime.steer * 0.08).normalize();
-    frameSide.crossVectors(heading, worldUp).normalize();
-    frameUp.crossVectors(frameSide, heading).normalize();
-    frameMatrix.makeBasis(heading, frameUp, frameSide);
-    pathQuaternion.setFromRotationMatrix(frameMatrix);
+    const roadCurvature = tangent.x * targetTangent.z - tangent.z * targetTangent.x;
+    const steerRoll = -runtime.steer * 0.28;
+    const curveRoll = -roadCurvature * runtime.velocity * 0.42;
+    const targetRoll = THREE.MathUtils.clamp(steerRoll + curveRoll, -0.42, 0.42);
 
+    const pitchSlope = Math.atan2(tangent.y, Math.sqrt(tangent.x * tangent.x + tangent.z * tangent.z));
+    const accelPitch = -runtime.acceleration * 0.042;
+    const targetPitch = THREE.MathUtils.clamp(pitchSlope + accelPitch, -0.28, 0.28);
+
+    bikeRoot.current?.position.copy(point);
     if (bikeRoot.current) {
-      bikeRoot.current.position.set(point.x, point.y + floorOffset, point.z);
-      bikeRoot.current.quaternion.slerp(pathQuaternion, 1 - Math.exp(-delta * (10.5 + runtime.velocity * 3)));
+      bikeRoot.current.position.y += floorOffset;
+      bikeRoot.current.rotation.y = Math.atan2(-tangent.x, -tangent.z);
     }
+
     if (visual.current) {
-      visual.current.rotation.x = THREE.MathUtils.damp(visual.current.rotation.x, leanTarget, 6.8, delta);
-      const pitchTarget = terminalScene ? 0 : THREE.MathUtils.clamp(runtime.acceleration * 0.032, -0.055, 0.032);
-      visual.current.rotation.z = THREE.MathUtils.damp(visual.current.rotation.z, pitchTarget, braking ? 10 : 5.5, delta);
-      visual.current.position.y = THREE.MathUtils.damp(visual.current.position.y, 0, 10, delta);
+      const parkingLean = terminalScene ? -0.12 * parkingStand : 0;
+      visual.current.rotation.z = THREE.MathUtils.damp(visual.current.rotation.z, targetRoll + parkingLean, 7.5, delta);
+      visual.current.rotation.x = THREE.MathUtils.damp(visual.current.rotation.x, targetPitch, 7.5, delta);
+      visual.current.rotation.y = THREE.MathUtils.damp(visual.current.rotation.y, runtime.steer * 0.09, 8.0, delta);
     }
     if (kickstand.current) {
       kickstand.current.rotation.x = THREE.MathUtils.lerp(-0.18, -0.42, parkingStand);
@@ -1687,15 +1690,19 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     if (rearWheel) rearWheel.rotation.z = -runtime.wheelAngle;
     if (frontWheel) frontWheel.rotation.z = -runtime.wheelAngle;
 
-    const focusTarget = !terminalScene && !!activeStop && (controller.mode === 'target' || controller.mode === 'aiming' || controller.mode === 'shot');
+    const signFocus = activeStop
+      ? getRoadsidePose(activeStop).position.clone().add(new THREE.Vector3(0, 0.25, 0))
+      : point.clone().addScaledVector(tangent, 10);
+
     const speed01 = runtime.velocity;
+    const focusTarget = controller.mode === 'target' || controller.mode === 'aiming' || controller.mode === 'shot';
 
     if (terminalScene) {
-      // Keyframe 1: Parking & Dismount (0s - 4.8s)
-      const cam1Pos = summitPoint.clone().addScaledVector(summitTangent, -4.2).addScaledVector(summitSide, 4.5);
-      cam1Pos.y = summitPoint.y + 2.2;
-      const cam1Look = summitPoint.clone().addScaledVector(summitTangent, 0.2).addScaledVector(summitSide, 0.8);
-      cam1Look.y = summitPoint.y + 1.4;
+      // Keyframe 1: Arrival & Kickstand Parking Shot (0.0s - 4.8s)
+      const cam1Pos = summitPoint.clone().addScaledVector(summitTangent, -4.8).addScaledVector(summitSide, 3.2);
+      cam1Pos.y = summitPoint.y + 1.85;
+      const cam1Look = summitPoint.clone().addScaledVector(summitTangent, 0.8);
+      cam1Look.y = summitPoint.y + 1.25;
 
       // Keyframe 2: Helmet Removal Close-up Portrait (4.8s - 7.6s)
       const cam2Pos = summitPoint.clone().addScaledVector(summitTangent, 1.2).addScaledVector(summitSide, 2.8);
@@ -1741,22 +1748,22 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       if (isAiming) {
         // Heroic over-the-left-shoulder cinematic tracking camera:
         // Positioned left-rear so her extended right arm, the metallic sidearm, and the huge roadside target billboard ahead are crystal clear
-        const cameraBack = 4.2;
-        const cameraSide = 2.65;
-        const cameraHeight = 1.78;
+        const cameraBack = 3.9;
+        const cameraSide = 3.0;
+        const cameraHeight = 1.95;
         desiredCamera.copy(point).addScaledVector(tangent, -(cameraBack - (braking ? 0.3 : 0))).addScaledVector(side, cameraSide);
         desiredCamera.y = point.y + cameraHeight - (braking ? 0.1 : 0);
 
         // Frame the sightline from her gun out towards the giant roadside billboard
-        const aimCenter = signFocus.clone().lerp(point.clone().addScaledVector(tangent, 3.5), 0.22);
+        const aimCenter = signFocus.clone().lerp(point.clone().addScaledVector(tangent, 3.2), 0.18);
         desiredLook.copy(aimCenter);
       } else if (isTarget) {
-        const cameraBack = 7.2;
-        const cameraSide = 1.75;
+        const cameraBack = 5.2;
+        const cameraSide = 2.6;
         const cameraHeight = 2.05;
         desiredCamera.copy(point).addScaledVector(tangent, -cameraBack).addScaledVector(side, cameraSide);
         desiredCamera.y = point.y + cameraHeight;
-        desiredLook.copy(signFocus).lerp(point.clone().addScaledVector(tangent, 5.5), 0.42);
+        desiredLook.copy(signFocus).lerp(point.clone().addScaledVector(tangent, 4.0), 0.28);
       } else {
         const lookAhead = THREE.MathUtils.lerp(5.5, 10.5, speed01);
         const cameraBack = THREE.MathUtils.lerp(7.6, 9.5, speed01);

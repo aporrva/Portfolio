@@ -1330,30 +1330,335 @@ function SummitVista() {
 const BIKE_SCALE = 1.28;
 const WHEEL_RADIUS_WORLD = 0.495 * BIKE_SCALE;
 
-const STANDING_RIDER_POSITIONS: Record<string, [number, number, number]> = {
-  'Rider hips': [-0.38, 1.38, 0],
-  'Rider torso jacket': [-0.32, 1.78, 0],
-  'Shoulder left': [-0.28, 1.98, 0.25],
-  'Shoulder right': [-0.28, 1.98, -0.25],
-  'Rider neck': [-0.23, 2.13, 0],
-  'Jacket arm': [-0.28, 1.68, 0.31],
-  'Gloved forearm': [-0.28, 1.28, 0.32],
-  'Glove': [-0.24, 1.02, 0.32],
-  'Jacket arm.001': [-0.28, 1.68, -0.31],
-  'Gloved forearm.001': [-0.28, 1.28, -0.32],
-  'Glove.001': [-0.24, 1.02, -0.32],
-  'Riding thigh': [-0.36, 1.03, 0.18],
-  'Riding shin': [-0.35, 0.57, 0.18],
-  'Riding boot': [-0.24, 0.18, 0.18],
-  'Riding thigh.001': [-0.36, 1.03, -0.18],
-  'Riding shin.001': [-0.35, 0.57, -0.18],
-  'Riding boot.001': [-0.24, 0.18, -0.18],
-  'Rider scarf': [-0.36, 2.12, 0],
-};
-const STRAIGHTEN_RIDER_PARTS = new Set([
+
+const RIDER_PART_NAMES = [
+  'Rider hips', 'Rider torso jacket', 'Shoulder left', 'Shoulder right', 'Rider neck',
   'Jacket arm', 'Gloved forearm', 'Glove', 'Jacket arm.001', 'Gloved forearm.001', 'Glove.001',
   'Riding thigh', 'Riding shin', 'Riding boot', 'Riding thigh.001', 'Riding shin.001', 'Riding boot.001',
-]);
+  'Rider scarf',
+] as const;
+
+const HELMET_PART_NAMES = ['Rider helmet', 'Helmet crown', 'Helmet visor', 'Helmet rear'] as const;
+
+function resolveModelPart(root: THREE.Object3D, canonicalName: string) {
+  const part = root.getObjectByName(canonicalName)
+    ?? root.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(canonicalName));
+  if (part) part.name = canonicalName;
+  return part;
+}
+
+function createOrganicFaceGeometry() {
+  const geometry = new THREE.SphereGeometry(1, 48, 32);
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+
+  for (let index = 0; index < position.count; index += 1) {
+    const x = position.getX(index);
+    const y = position.getY(index);
+    const z = position.getZ(index);
+    const lowerFace = THREE.MathUtils.clamp(-y, 0, 1);
+    const jawTaper = 1 - lowerFace * 0.24;
+    const cheekSoftness = 1 + Math.exp(-Math.pow((y + 0.02) / 0.34, 2)) * 0.035;
+    position.setXYZ(index, x * (1 - lowerFace * 0.035), y, z * jawTaper * cheekSoftness);
+  }
+
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function makeStrand(points: Array<[number, number, number]>, radius: number, segments = 24) {
+  const curve = new THREE.CatmullRomCurve3(points.map((point) => new THREE.Vector3(...point)));
+  return new THREE.TubeGeometry(curve, segments, radius, 10, false);
+}
+
+function softenRiderMeshes(riderGroup: THREE.Group) {
+  const jacketMaterial = new THREE.MeshPhysicalMaterial({
+    color: '#242830',
+    roughness: 0.72,
+    metalness: 0,
+    clearcoat: 0.08,
+    clearcoatRoughness: 0.82,
+    sheen: 0.35,
+    sheenColor: '#744557',
+    sheenRoughness: 0.82,
+  });
+  const sleeveMaterial = new THREE.MeshStandardMaterial({ color: '#292a31', roughness: 0.78, metalness: 0 });
+  const pantsMaterial = new THREE.MeshStandardMaterial({ color: '#211f25', roughness: 0.88, metalness: 0 });
+  const gloveMaterial = new THREE.MeshStandardMaterial({ color: '#181a1f', roughness: 0.64, metalness: 0.02 });
+  const bootMaterial = new THREE.MeshPhysicalMaterial({
+    color: '#15171b', roughness: 0.55, metalness: 0.02, clearcoat: 0.12, clearcoatRoughness: 0.7,
+  });
+  const skinMaterial = new THREE.MeshStandardMaterial({ color: '#a96851', roughness: 0.74, metalness: 0 });
+  const scarfMaterial = new THREE.MeshStandardMaterial({ color: '#9f4051', roughness: 0.9, metalness: 0 });
+  const accentMaterial = new THREE.MeshStandardMaterial({ color: '#c78658', roughness: 0.56, metalness: 0.06 });
+
+  const fit = (
+    name: string,
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    scale: [number, number, number] = [1, 1, 1],
+  ) => {
+    const object = riderGroup.getObjectByName(name);
+    if (!(object instanceof THREE.Mesh)) return null;
+    object.geometry = geometry;
+    object.material = material;
+    object.scale.set(...scale);
+    object.castShadow = true;
+    object.receiveShadow = true;
+    return object;
+  };
+
+  fit('Rider hips', new THREE.SphereGeometry(1, 32, 24), pantsMaterial, [0.25, 0.2, 0.31]);
+
+  const torsoProfile = [
+    new THREE.Vector2(0.16, -0.39),
+    new THREE.Vector2(0.2, -0.35),
+    new THREE.Vector2(0.22, -0.25),
+    new THREE.Vector2(0.205, -0.12),
+    new THREE.Vector2(0.22, 0.04),
+    new THREE.Vector2(0.265, 0.21),
+    new THREE.Vector2(0.24, 0.33),
+    new THREE.Vector2(0.15, 0.39),
+  ];
+  const torsoObj = fit(
+    'Rider torso jacket',
+    new THREE.LatheGeometry(torsoProfile, 36),
+    jacketMaterial,
+    [0.74, 1, 1],
+  );
+
+  fit('Shoulder left', new THREE.SphereGeometry(1, 28, 20), jacketMaterial, [0.115, 0.13, 0.145]);
+  fit('Shoulder right', new THREE.SphereGeometry(1, 28, 20), jacketMaterial, [0.115, 0.13, 0.145]);
+  fit('Rider neck', new THREE.CapsuleGeometry(0.068, 0.035, 8, 18), skinMaterial);
+
+  for (const name of ['Jacket arm', 'Jacket arm.001']) {
+    fit(name, new THREE.CapsuleGeometry(0.09, 0.39, 8, 18), jacketMaterial);
+  }
+  for (const name of ['Gloved forearm', 'Gloved forearm.001']) {
+    fit(name, new THREE.CapsuleGeometry(0.068, 0.49, 8, 18), sleeveMaterial);
+  }
+  for (const name of ['Glove', 'Glove.001']) {
+    fit(name, new THREE.SphereGeometry(1, 24, 18), gloveMaterial, [0.1, 0.075, 0.087]);
+  }
+  for (const name of ['Riding thigh', 'Riding thigh.001']) {
+    fit(name, new THREE.CapsuleGeometry(0.125, 0.38, 8, 18), pantsMaterial);
+  }
+  for (const name of ['Riding shin', 'Riding shin.001']) {
+    fit(name, new THREE.CapsuleGeometry(0.094, 0.41, 8, 18), pantsMaterial);
+  }
+  for (const name of ['Riding boot', 'Riding boot.001']) {
+    fit(name, new THREE.SphereGeometry(1, 24, 18), bootMaterial, [0.185, 0.075, 0.1]);
+  }
+
+  const scarf = riderGroup.getObjectByName('Rider scarf');
+  if (scarf instanceof THREE.Mesh) scarf.material = scarfMaterial;
+
+  if (torsoObj) {
+    const zipper = new THREE.Mesh(new THREE.CapsuleGeometry(0.008, 0.52, 4, 10), accentMaterial);
+    zipper.name = 'Jacket zipper';
+    zipper.position.set(0.272, -0.035, 0);
+
+    const belt = new THREE.Mesh(new THREE.TorusGeometry(0.207, 0.012, 8, 32), accentMaterial);
+    belt.name = 'Jacket waist piping';
+    belt.position.y = -0.29;
+    belt.rotation.x = Math.PI / 2;
+
+    const collarLeft = new THREE.Mesh(new THREE.CapsuleGeometry(0.012, 0.19, 4, 10), accentMaterial);
+    collarLeft.position.set(0.268, 0.245, 0.075);
+    collarLeft.rotation.x = 0.56;
+    const collarRight = collarLeft.clone();
+    collarRight.position.z = -0.075;
+    collarRight.rotation.x = -0.56;
+
+    for (const detail of [zipper, belt, collarLeft, collarRight]) detail.castShadow = true;
+    torsoObj.add(zipper, belt, collarLeft, collarRight);
+  }
+
+  return { torsoObj, torsoBaseScale: torsoObj?.scale.clone() ?? null };
+}
+
+function createHumanizedHead(riderGroup: THREE.Group) {
+  const skinMaterial = new THREE.MeshPhysicalMaterial({
+    color: '#a96851', roughness: 0.73, metalness: 0, clearcoat: 0.04, clearcoatRoughness: 0.9,
+  });
+  const skinHighlightMaterial = new THREE.MeshStandardMaterial({ color: '#b9775d', roughness: 0.76, metalness: 0 });
+  const hairMaterial = new THREE.MeshStandardMaterial({ color: '#201510', roughness: 0.86, metalness: 0 });
+  const browMaterial = new THREE.MeshStandardMaterial({ color: '#2b1b15', roughness: 0.9, metalness: 0 });
+  const eyeWhiteMaterial = new THREE.MeshStandardMaterial({ color: '#f4e9dc', roughness: 0.42, metalness: 0 });
+  const irisMaterial = new THREE.MeshStandardMaterial({ color: '#5b3425', roughness: 0.48, metalness: 0 });
+  const pupilMaterial = new THREE.MeshBasicMaterial({ color: '#130e0c', toneMapped: false });
+  const eyeHighlightMaterial = new THREE.MeshBasicMaterial({ color: '#fff8e8', toneMapped: false });
+  const lipMaterial = new THREE.MeshStandardMaterial({ color: '#9f4f5b', roughness: 0.62, metalness: 0 });
+  const blushMaterial = new THREE.MeshStandardMaterial({
+    color: '#c06b6d', roughness: 0.9, transparent: true, opacity: 0.2, depthWrite: false,
+  });
+  const hairBandMaterial = new THREE.MeshStandardMaterial({ color: '#c78658', roughness: 0.5, metalness: 0.08 });
+
+  const headReveal = new THREE.Group();
+  headReveal.name = 'RiderHeadReveal';
+  headReveal.position.set(0.06, 2.22, 0);
+  headReveal.visible = false;
+
+  const face = new THREE.Mesh(createOrganicFaceGeometry(), skinMaterial);
+  face.name = 'Humanized face';
+  face.scale.set(0.2, 0.25, 0.19);
+
+  const hairCrown = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 38, 26, 0, Math.PI * 2, 0, Math.PI * 0.69),
+    hairMaterial,
+  );
+  hairCrown.name = 'Soft hair crown';
+  hairCrown.position.set(-0.02, 0.055, 0);
+  hairCrown.scale.set(0.215, 0.27, 0.205);
+
+  const leftFringe = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), hairMaterial);
+  leftFringe.position.set(0.17, 0.15, 0.065);
+  leftFringe.scale.set(0.038, 0.075, 0.095);
+  leftFringe.rotation.x = 0.18;
+  const rightFringe = leftFringe.clone();
+  rightFringe.position.z = -0.065;
+  rightFringe.rotation.x = -0.18;
+
+  const earGeometry = new THREE.SphereGeometry(1, 20, 14);
+  for (const side of [-1, 1]) {
+    const ear = new THREE.Mesh(earGeometry, skinMaterial);
+    ear.position.set(-0.005, 0, side * 0.19);
+    ear.scale.set(0.035, 0.055, 0.027);
+    headReveal.add(ear);
+  }
+
+  const eyeGeometry = new THREE.SphereGeometry(1, 24, 16);
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(eyeGeometry, eyeWhiteMaterial);
+    eye.position.set(0.182, 0.052, side * 0.073);
+    eye.scale.set(0.014, 0.027, 0.049);
+
+    const iris = new THREE.Mesh(eyeGeometry, irisMaterial);
+    iris.position.set(0.195, 0.052, side * 0.073);
+    iris.scale.set(0.007, 0.014, 0.02);
+
+    const pupil = new THREE.Mesh(eyeGeometry, pupilMaterial);
+    pupil.position.set(0.201, 0.052, side * 0.073);
+    pupil.scale.set(0.004, 0.0075, 0.009);
+
+    const highlight = new THREE.Mesh(eyeGeometry, eyeHighlightMaterial);
+    highlight.position.set(0.205, 0.059, side * 0.068);
+    highlight.scale.setScalar(0.0035);
+
+    const brow = new THREE.Mesh(
+      makeStrand([
+        [0.187, 0.112, side * 0.118],
+        [0.19, 0.126, side * 0.075],
+        [0.187, 0.116, side * 0.031],
+      ], 0.006, 12),
+      browMaterial,
+    );
+    const lashes = new THREE.Mesh(
+      makeStrand([
+        [0.199, 0.074, side * 0.118],
+        [0.201, 0.083, side * 0.075],
+        [0.199, 0.077, side * 0.03],
+      ], 0.0032, 10),
+      browMaterial,
+    );
+
+    headReveal.add(eye, iris, pupil, highlight, brow, lashes);
+  }
+
+  const noseBridge = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 18), skinHighlightMaterial);
+  noseBridge.position.set(0.184, 0.006, 0);
+  noseBridge.scale.set(0.024, 0.07, 0.025);
+  const noseTip = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 18), skinHighlightMaterial);
+  noseTip.position.set(0.202, -0.021, 0);
+  noseTip.scale.set(0.029, 0.023, 0.031);
+
+  const upperLip = new THREE.Mesh(
+    makeStrand([
+      [0.196, -0.083, -0.056],
+      [0.199, -0.076, -0.02],
+      [0.201, -0.083, 0],
+      [0.199, -0.076, 0.02],
+      [0.196, -0.083, 0.056],
+    ], 0.0055, 18),
+    lipMaterial,
+  );
+  const lowerLip = new THREE.Mesh(
+    makeStrand([
+      [0.195, -0.088, -0.052],
+      [0.199, -0.102, 0],
+      [0.195, -0.088, 0.052],
+    ], 0.005, 14),
+    lipMaterial,
+  );
+
+  for (const side of [-1, 1]) {
+    const blush = new THREE.Mesh(new THREE.SphereGeometry(1, 18, 12), blushMaterial);
+    blush.position.set(0.184, -0.024, side * 0.112);
+    blush.scale.set(0.008, 0.034, 0.045);
+
+    const sideLock = new THREE.Mesh(
+      makeStrand([
+        [0.13, 0.145, side * 0.145],
+        [0.145, 0.045, side * 0.18],
+        [0.105, -0.095, side * 0.185],
+        [0.025, -0.205, side * 0.16],
+      ], 0.016, 20),
+      hairMaterial,
+    );
+    headReveal.add(blush, sideLock);
+  }
+
+  for (const mesh of [face, hairCrown, leftFringe, rightFringe, noseBridge, noseTip, upperLip, lowerLip]) {
+    mesh.castShadow = true;
+  }
+  headReveal.add(face, hairCrown, leftFringe, rightFringe, noseBridge, noseTip, upperLip, lowerLip);
+
+  const ponytailRef = new THREE.Group();
+  ponytailRef.name = 'PonytailGroup';
+  ponytailRef.position.set(-0.135, 2.245, 0);
+  const ponytailBase = ponytailRef.position.clone();
+
+  const napeHair = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 20), hairMaterial);
+  napeHair.position.set(0, -0.055, 0);
+  napeHair.scale.set(0.11, 0.13, 0.17);
+
+  const hairBand = new THREE.Mesh(new THREE.TorusGeometry(0.052, 0.014, 8, 20), hairBandMaterial);
+  hairBand.position.set(-0.045, -0.075, 0);
+  hairBand.rotation.y = Math.PI / 2;
+
+  const ponytail = new THREE.Mesh(
+    makeStrand([
+      [-0.045, -0.075, 0],
+      [-0.12, -0.12, 0.025],
+      [-0.2, -0.2, -0.025],
+      [-0.3, -0.3, 0.045],
+      [-0.39, -0.43, 0],
+    ], 0.054, 30),
+    hairMaterial,
+  );
+  const curlLeft = new THREE.Mesh(
+    makeStrand([
+      [-0.035, -0.07, 0.04],
+      [-0.12, -0.15, 0.085],
+      [-0.23, -0.25, 0.035],
+      [-0.34, -0.38, 0.075],
+    ], 0.024, 24),
+    hairMaterial,
+  );
+  const curlRight = new THREE.Mesh(
+    makeStrand([
+      [-0.035, -0.07, -0.04],
+      [-0.11, -0.16, -0.08],
+      [-0.22, -0.27, -0.03],
+      [-0.33, -0.4, -0.07],
+    ], 0.022, 24),
+    hairMaterial,
+  );
+  for (const mesh of [napeHair, hairBand, ponytail, curlLeft, curlRight]) mesh.castShadow = true;
+  ponytailRef.add(napeHair, hairBand, ponytail, curlLeft, curlRight);
+
+  riderGroup.add(headReveal, ponytailRef);
+  return { headReveal, ponytailRef, ponytailBase };
+}
 
 const MODEL_PATH = `${process.env.NEXT_PUBLIC_BASE_PATH || ''}/models/apoorva-cafe-rider.glb`;
 
@@ -1488,7 +1793,7 @@ function RideRig({
   lowQuality: boolean;
 }) {
   const { scene } = useGLTF(MODEL_PATH);
-  const { camera, size } = useThree();
+  const { camera } = useThree();
   const bikeRoot = useRef<THREE.Group>(null);
   const visual = useRef<THREE.Group>(null);
   const leftExhaustAnchor = useRef<THREE.Group>(null);
@@ -1517,16 +1822,8 @@ function RideRig({
   const summitTangent = useMemo(() => roadCurve.getTangentAt(SUMMIT_PROGRESS).normalize(), []);
   const summitSide = useMemo(() => new THREE.Vector3(-summitTangent.z, 0, summitTangent.x).normalize(), [summitTangent]);
   const sunPosition = useMemo(() => new THREE.Vector3(...SUN_POSITION), []);
-  const sunDirection = useMemo(() => sunPosition.clone().sub(summitPoint).normalize(), [summitPoint, sunPosition]);
-  const finalRiderYaw = useMemo(() => {
-    const localForward = sunDirection.dot(summitTangent);
-    const localSide = sunDirection.dot(summitSide);
-    return Math.atan2(-localSide, localForward);
-  }, [summitSide, summitTangent, sunDirection]);
   const finaleStartedAt = useRef(-1);
   const previousRideMode = useRef<RideState>('intro');
-  const riderTarget = useMemo(() => new THREE.Vector3(), []);
-  const identityQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const aimWeight = useRef(0);
   const shotFiredAt = useRef(-1);
   const lastShotStage = useRef(-1);
@@ -1542,11 +1839,13 @@ function RideRig({
     helmetBase,
     headReveal,
     ponytailRef,
+    ponytailBase,
     scarfObj,
     gunGroup,
     muzzleTip,
     muzzleFlash,
     torsoObj,
+    torsoBaseScale,
     riderOriginals,
   } = useMemo(() => {
     const clone = scene.clone(true);
@@ -1598,13 +1897,6 @@ function RideRig({
       if (object) steeringGroup.attach(object);
     }
 
-    const riderNames = [
-      'Rider hips', 'Rider torso jacket', 'Shoulder left', 'Shoulder right', 'Rider neck',
-      'Jacket arm', 'Gloved forearm', 'Glove', 'Jacket arm.001', 'Gloved forearm.001', 'Glove.001',
-      'Riding thigh', 'Riding shin', 'Riding boot', 'Riding thigh.001', 'Riding shin.001', 'Riding boot.001',
-      'Rider scarf',
-    ];
-    const helmetNames = ['Rider helmet', 'Helmet crown', 'Helmet visor', 'Helmet rear'];
     const riderGroup = new THREE.Group();
     riderGroup.name = 'RiderDismount';
     const helmetGroup = new THREE.Group();
@@ -1614,18 +1906,20 @@ function RideRig({
     clone.add(riderGroup);
     clone.updateMatrixWorld(true);
 
-    for (const name of riderNames) {
-      const object = clone.getObjectByName(name);
+    for (const name of RIDER_PART_NAMES) {
+      const object = resolveModelPart(clone, name);
       if (object) riderGroup.attach(object);
     }
     riderGroup.add(helmetGroup);
     clone.updateMatrixWorld(true);
-    for (const name of helmetNames) {
-      const object = clone.getObjectByName(name);
+    for (const name of HELMET_PART_NAMES) {
+      const object = resolveModelPart(clone, name);
       if (object) helmetGroup.attach(object);
     }
 
-    const riderParts = riderNames
+    const { torsoObj, torsoBaseScale } = softenRiderMeshes(riderGroup);
+
+    const riderParts = RIDER_PART_NAMES
       .map((name) => riderGroup.getObjectByName(name))
       .filter((object): object is THREE.Object3D => !!object);
     const riderOriginals = riderParts.map((object) => ({
@@ -1635,7 +1929,6 @@ function RideRig({
     }));
 
     const scarfObj = riderGroup.getObjectByName('Rider scarf');
-    const torsoObj = riderGroup.getObjectByName('Rider torso jacket');
 
     // Attach prominent, stylish sci-fi pistol to right glove
     const rightGlove = riderGroup.getObjectByName('Glove.001');
@@ -1698,61 +1991,7 @@ function RideRig({
     gunGroup.add(gunBody, gunSlide, energyCore, barrel, laserDiode, muzzleTip, muzzleFlash, grip);
     if (rightGlove) rightGlove.add(gunGroup);
 
-    const headReveal = new THREE.Group();
-    headReveal.name = 'RiderHeadReveal';
-    headReveal.position.set(0.06, 2.22, 0);
-    headReveal.visible = false;
-
-    // Face / head base
-    const face = new THREE.Mesh(
-      new THREE.SphereGeometry(0.22, 24, 18),
-      new THREE.MeshStandardMaterial({ color: '#9b624c', roughness: 0.78 }),
-    );
-    face.scale.set(1.04, 1.16, 0.96);
-
-    // Styled hair crown
-    const hair = new THREE.Mesh(
-      new THREE.SphereGeometry(0.238, 22, 18, 0, Math.PI * 2, 0, Math.PI * 0.64),
-      new THREE.MeshStandardMaterial({ color: '#1a1410', roughness: 0.88 }),
-    );
-    hair.position.set(-0.03, 0.09, 0);
-
-    // Front bangs / fringe
-    const bangs = new THREE.Mesh(
-      new THREE.SphereGeometry(0.18, 16, 12, 0, Math.PI, 0, Math.PI * 0.45),
-      new THREE.MeshStandardMaterial({ color: '#1a1410', roughness: 0.88 }),
-    );
-    bangs.position.set(0.13, 0.12, 0);
-    bangs.rotation.set(0, Math.PI / 2, -0.3);
-
-    // Cool dark sunglasses
-    const shades = new THREE.Mesh(
-      new THREE.BoxGeometry(0.11, 0.065, 0.28),
-      new THREE.MeshStandardMaterial({ color: '#111518', roughness: 0.25, metalness: 0.8 }),
-    );
-    shades.position.set(0.18, 0.035, 0);
-
-    // Ponytail with hair band
-    const ponytailRef = new THREE.Group();
-    ponytailRef.name = 'PonytailGroup';
-    ponytailRef.position.set(-0.21, 0.02, 0);
-
-    const hairBand = new THREE.Mesh(
-      new THREE.TorusGeometry(0.045, 0.018, 8, 16),
-      new THREE.MeshStandardMaterial({ color: '#d28236', roughness: 0.45 }),
-    );
-    hairBand.rotation.y = Math.PI / 2;
-
-    const ponytail = new THREE.Mesh(
-      new THREE.ConeGeometry(0.09, 0.42, 12),
-      new THREE.MeshStandardMaterial({ color: '#1a1410', roughness: 0.9 }),
-    );
-    ponytail.position.set(-0.12, -0.16, 0);
-    ponytail.rotation.z = 0.55;
-
-    ponytailRef.add(hairBand, ponytail);
-    headReveal.add(face, hair, bangs, shades, ponytailRef);
-    riderGroup.add(headReveal);
+    const { headReveal, ponytailRef, ponytailBase } = createHumanizedHead(riderGroup);
 
     clone.updateMatrixWorld(true);
     const bounds = new THREE.Box3().setFromObject(clone);
@@ -1764,11 +2003,13 @@ function RideRig({
       helmetBase,
       headReveal,
       ponytailRef,
+      ponytailBase,
       scarfObj,
       gunGroup,
       muzzleTip,
       muzzleFlash,
       torsoObj,
+      torsoBaseScale,
       riderOriginals,
       floorOffset: 0.08 - bounds.min.y * BIKE_SCALE,
     };
@@ -1799,20 +2040,9 @@ function RideRig({
     if (terminalScene && finaleStartedAt.current < 0) finaleStartedAt.current = clock.elapsedTime;
     const finaleElapsed = terminalScene ? Math.max(0, clock.elapsedTime - finaleStartedAt.current) : 0;
 
-    // Timeline phases:
-    // 0.2s - 2.0s: Puts bike on kickstand & bike settles with realistic lean
-    // 2.0s - 4.8s: Dismounts from bike (swings right leg over, stands on ground)
-    // 4.8s - 7.6s: Takes helmet off (arms reach up, lifts helmet, reveals face/hair, carries helmet to hip)
-    // 7.6s - 10.4s: Turns toward the vista and slowly scans the environment
-    // 10.4s+: Holds beside the parked bike, helmet at her hip, taking in the view
-    const parkingStand = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 0.2, 1.8) : 0;
-    const dismountProgress = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 2.0, 4.8) : 0;
-    const armLiftProgress = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 4.8, 5.9) : 0;
-    const helmetLift = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 5.6, 6.7) : 0;
-    const helmetCarry = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 6.4, 7.6) : 0;
-    const environmentLook = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 7.4, 9.4) : 0;
-    const panoramaSweep = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 8.0, 10.4) : 0;
-    const panoramaSettle = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 10.4, 12.2) : 0;
+    // Finale: settle the motorcycle onto its kickstand, then reveal and hold the summit view.
+    const parkingStand = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 0.15, 1.1) : 0;
+    const viewReveal = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 1.15, 3.6) : 0;
 
     // Gun aiming & shooting weights
     const isAimingMode = (controller.mode === 'target' || controller.mode === 'aiming' || controller.mode === 'shot') && !terminalScene;
@@ -1826,82 +2056,17 @@ function RideRig({
     if (terminalScene) {
       // In finale, gun is holstered
       if (gunGroup) gunGroup.visible = false;
+      riderGroup.position.set(0, 0, 0);
+      riderGroup.rotation.set(0, 0, 0);
+      helmetGroup.position.copy(helmetBase);
+      helmetGroup.rotation.set(0, 0, 0);
+      headReveal.visible = false;
+      headReveal.scale.setScalar(0);
+      headReveal.rotation.set(0, 0, 0);
 
-      const sideX = -0.32 * dismountProgress;
-      const sideZ = 1.38 * dismountProgress;
-
-      // Step down beside the motorcycle, then turn toward the real rendered vista.
-      const riderTargetY = -0.14 * dismountProgress;
-
-      riderGroup.position.set(sideX, riderTargetY, sideZ);
-      riderGroup.rotation.x = -0.065 * parkingStand * dismountProgress;
-      riderGroup.rotation.y = THREE.MathUtils.lerp(-0.04 * dismountProgress, finalRiderYaw, environmentLook);
-
-      // Rider body parts articulation
       for (const snapshot of riderOriginals) {
-        const target = STANDING_RIDER_POSITIONS[snapshot.object.name];
-        if (target) {
-          riderTarget.set(target[0], target[1], target[2]);
-          snapshot.object.position.lerpVectors(snapshot.position, riderTarget, dismountProgress);
-
-          // Right leg swing over the cafe seat during dismount
-          if (snapshot.object.name.startsWith('Riding') && snapshot.object.name.endsWith('.001')) {
-            const stepArc = Math.sin(dismountProgress * Math.PI);
-            snapshot.object.position.y += stepArc * 0.28;
-            snapshot.object.position.z -= stepArc * 0.32;
-          }
-
-          // Arm animation: Raising to helmet, lifting, and carrying down to hip
-          const isLeftArm = snapshot.object.name === 'Jacket arm' || snapshot.object.name === 'Gloved forearm' || snapshot.object.name === 'Glove';
-          const isRightArm = snapshot.object.name === 'Jacket arm.001' || snapshot.object.name === 'Gloved forearm.001' || snapshot.object.name === 'Glove.001';
-
-          if (dismountProgress >= 0.95) {
-            if (isLeftArm) {
-              const liftY = 0.58 * armLiftProgress - 0.42 * helmetCarry;
-              const liftX = 0.32 * armLiftProgress - 0.24 * helmetCarry;
-              const liftZ = 0.08 * armLiftProgress + 0.18 * helmetCarry;
-              snapshot.object.position.y += liftY;
-              snapshot.object.position.x += liftX;
-              snapshot.object.position.z += liftZ;
-            } else if (isRightArm) {
-              const liftY = 0.58 * armLiftProgress - 0.58 * helmetCarry;
-              const liftX = 0.32 * armLiftProgress - 0.32 * helmetCarry;
-              snapshot.object.position.y += liftY;
-              snapshot.object.position.x += liftX;
-            }
-          }
-        }
-
-        if (STRAIGHTEN_RIDER_PARTS.has(snapshot.object.name)) {
-          snapshot.object.quaternion.slerpQuaternions(snapshot.quaternion, identityQuaternion, dismountProgress);
-        }
-      }
-
-      // Helmet removal animation (lifts up from head, moves down to rest beside left hip)
-      helmetGroup.position.set(
-        helmetBase.x - 0.26 * helmetCarry,
-        helmetBase.y + 0.42 * helmetLift - 1.34 * helmetCarry,
-        helmetBase.z + 0.44 * helmetCarry,
-      );
-      helmetGroup.rotation.x = 0.54 * helmetCarry;
-      helmetGroup.rotation.z = -0.2 * helmetCarry;
-
-      // Reveal head/face and hair once helmet begins lifting
-      headReveal.visible = finaleElapsed > 5.5;
-      const headScale = THREE.MathUtils.smootherstep(finaleElapsed, 5.5, 6.1);
-      headReveal.scale.setScalar(headScale);
-      const panoramaYaw = THREE.MathUtils.lerp(-0.34, 0.3, panoramaSweep);
-      const panoramaHeadYaw = THREE.MathUtils.lerp(panoramaYaw * environmentLook, 0, panoramaSettle);
-      const panoramaHeadTilt = 0.04 * Math.sin(panoramaSweep * Math.PI) * environmentLook;
-      headReveal.rotation.set(0, panoramaHeadYaw, panoramaHeadTilt);
-
-      // Ponytail & scarf gentle wind sway
-      if (ponytailRef) {
-        ponytailRef.rotation.z = 0.12 + Math.sin(clock.elapsedTime * 3.6) * 0.09;
-        ponytailRef.rotation.y = Math.sin(clock.elapsedTime * 2.4) * 0.06;
-      }
-      if (scarfObj) {
-        scarfObj.rotation.x = Math.sin(clock.elapsedTime * 4.2) * 0.06;
+        snapshot.object.position.copy(snapshot.position);
+        snapshot.object.quaternion.copy(snapshot.quaternion);
       }
     } else {
       // Normal driving / aiming posture
@@ -1955,6 +2120,39 @@ function RideRig({
         helmetGroup.rotation.y = targetSide * 0.68 * currentAim;
         helmetGroup.rotation.x = -0.12 * currentAim;
       }
+    }
+
+    // Soft, continuous secondary motion keeps the rider from reading as a rigid mannequin.
+    const breath = Math.sin(clock.elapsedTime * 1.65) * 0.007;
+    if (torsoObj && torsoBaseScale) {
+      torsoObj.scale.set(
+        torsoBaseScale.x * (1 + breath * 0.24),
+        torsoBaseScale.y * (1 + breath),
+        torsoBaseScale.z * (1 + breath * 0.36),
+      );
+    }
+
+    const motionVelocity = THREE.MathUtils.clamp(runtime.velocity / 0.72, 0, 1);
+    if (!terminalScene) {
+      const naturalHeadWeight = 1 - aimWeight.current;
+      helmetGroup.position.y += Math.sin(clock.elapsedTime * 2.1) * 0.004 * naturalHeadWeight;
+      helmetGroup.rotation.y += Math.sin(clock.elapsedTime * 0.62) * 0.026 * naturalHeadWeight;
+      helmetGroup.rotation.z += (
+        Math.sin(clock.elapsedTime * 1.45) * 0.012 - runtime.steer * 0.035
+      ) * naturalHeadWeight;
+    }
+
+    ponytailRef.position.copy(ponytailBase);
+    ponytailRef.position.y += Math.sin(clock.elapsedTime * 3.2) * (terminalScene ? 0.006 : 0.01);
+    ponytailRef.rotation.z = (terminalScene ? 0.08 : 0.13)
+      + Math.sin(clock.elapsedTime * (terminalScene ? 2.8 : 4.2)) * (0.045 + motionVelocity * 0.07);
+    ponytailRef.rotation.y = Math.sin(clock.elapsedTime * 2.35) * (0.035 + motionVelocity * 0.04);
+    ponytailRef.rotation.x = Math.cos(clock.elapsedTime * 2.75) * 0.018;
+
+    if (scarfObj) {
+      const scarfFlutter = Math.sin(clock.elapsedTime * (4.1 + motionVelocity * 2.2))
+        * (terminalScene ? 0.05 : 0.025 + motionVelocity * 0.045);
+      scarfObj.rotation.x += scarfFlutter;
     }
 
     if (runtime.resetApplied !== controller.rideReset) {
@@ -2028,8 +2226,8 @@ function RideRig({
     let terminalBraking = false;
     if (controller.mode === 'summit') {
       desiredVelocity = Math.max(0.52, CRUISE_SPEED + (1 - CRUISE_SPEED) * throttle);
-      if (summitRemaining < 36) {
-        const summitLimit = THREE.MathUtils.lerp(0.04, 0.52, THREE.MathUtils.clamp(summitRemaining / 36, 0, 1));
+      if (summitRemaining < 20) {
+        const summitLimit = THREE.MathUtils.lerp(0.03, 0.58, THREE.MathUtils.clamp(summitRemaining / 20, 0, 1));
         desiredVelocity = Math.min(desiredVelocity, summitLimit);
       }
       if (summitRemaining <= 0.8) {
@@ -2043,12 +2241,14 @@ function RideRig({
     const velocityDelta = desiredVelocity - runtime.velocity;
     const accelerationRate = THREE.MathUtils.lerp(0.78, 0.42, runtime.velocity);
     const decelerationRate = braking || terminalBraking
-      ? 1.65
+      ? 2.2
       : controller.mode === 'aiming'
         ? 1.25
-        : controller.mode === 'target' || controller.mode === 'summit'
-          ? 0.62
-          : 0.34;
+        : controller.mode === 'summit'
+          ? 1.25
+          : controller.mode === 'target'
+            ? 0.62
+            : 0.34;
     const velocityRate = velocityDelta >= 0 ? accelerationRate : decelerationRate;
     runtime.velocity += THREE.MathUtils.clamp(velocityDelta, -velocityRate * delta, velocityRate * delta);
     const accelerationSample = (runtime.velocity - previousVelocity) / Math.max(delta, 0.001);
@@ -2217,52 +2417,19 @@ function RideRig({
     const focusTarget = controller.mode === 'target' || controller.mode === 'aiming' || controller.mode === 'shot';
 
     if (terminalScene) {
-      // Keyframe 1: Arrival & Kickstand Parking Shot (0.0s - 4.8s)
+      // Beat 1: close parking shot while the kickstand deploys.
       const cam1Pos = summitPoint.clone().addScaledVector(summitTangent, -4.8).addScaledVector(summitSide, 3.2);
       cam1Pos.y = summitPoint.y + 1.85;
       const cam1Look = summitPoint.clone().addScaledVector(summitTangent, 0.8);
       cam1Look.y = summitPoint.y + 1.25;
 
-      // Keyframe 2: Helmet Removal Close-up Portrait (4.8s - 7.6s)
-      const cam2Pos = summitPoint.clone().addScaledVector(summitTangent, 1.2).addScaledVector(summitSide, 2.8);
-      cam2Pos.y = summitPoint.y + 2.3;
-      const cam2Look = summitPoint.clone().addScaledVector(summitTangent, -0.2).addScaledVector(summitSide, 1.25);
-      cam2Look.y = summitPoint.y + 2.15;
-
-      // Keyframe 3: Over-shoulder environment reveal with rider and parked bike in frame
-      const parkedRiderPos = summitPoint.clone()
-        .addScaledVector(summitTangent, -0.32 * BIKE_SCALE)
-        .addScaledVector(summitSide, 1.38 * BIKE_SCALE);
-      parkedRiderPos.y = summitPoint.y + 1.7;
-
-      const portraitFinale = size.height > size.width;
-      const cam3Pos = parkedRiderPos.clone()
-        .addScaledVector(sunDirection, portraitFinale ? -6.2 : -5.0)
-        .addScaledVector(summitSide, portraitFinale ? 0.25 : 1.0);
-      cam3Pos.y = summitPoint.y + (portraitFinale ? 3.15 : 2.9);
-      const cam3Look = parkedRiderPos.clone()
-        .lerp(summitPoint, portraitFinale ? 0.36 : 0.26)
-        .addScaledVector(sunDirection, portraitFinale ? 4.5 : 8.0);
-      cam3Look.y = summitPoint.y + (portraitFinale ? 3.0 : 3.3);
-
-      // Keyframe 4: Majestic wide vista aimed at the same sun that is rendered in Atmosphere
+      // Beat 2: pull out to the landscape and hold there.
       const cam4Pos = summitPoint.clone().addScaledVector(summitTangent, -10.5).addScaledVector(summitSide, 8.8);
       cam4Pos.y = summitPoint.y + 6.2;
       const cam4Look = sunPosition.clone();
 
-      // Smooth blends between keyframe stages
-      const t12 = THREE.MathUtils.smootherstep(finaleElapsed, 4.2, 5.4);
-      const t23 = THREE.MathUtils.smootherstep(finaleElapsed, 7.2, 8.6);
-      const t34 = THREE.MathUtils.smootherstep(finaleElapsed, 10.8, 13.6);
-
-      const blend12Pos = new THREE.Vector3().lerpVectors(cam1Pos, cam2Pos, t12);
-      const blend12Look = new THREE.Vector3().lerpVectors(cam1Look, cam2Look, t12);
-
-      const blend23Pos = new THREE.Vector3().lerpVectors(blend12Pos, cam3Pos, t23);
-      const blend23Look = new THREE.Vector3().lerpVectors(blend12Look, cam3Look, t23);
-
-      desiredCamera.lerpVectors(blend23Pos, cam4Pos, t34);
-      desiredLook.lerpVectors(blend23Look, cam4Look, t34);
+      desiredCamera.lerpVectors(cam1Pos, cam4Pos, viewReveal);
+      desiredLook.lerpVectors(cam1Look, cam4Look, viewReveal);
     } else {
       const isAiming = controller.mode === 'aiming' || controller.mode === 'shot';
       const isTarget = controller.mode === 'target';
@@ -2304,12 +2471,12 @@ function RideRig({
     const cameraRate = terminalScene
       ? finaleCameraEntry
         ? 22
-        : THREE.MathUtils.lerp(2.8, 1.4, THREE.MathUtils.smootherstep(finaleElapsed, 10.8, 13.6))
+        : THREE.MathUtils.lerp(5.0, 2.0, viewReveal)
       : (controller.mode === 'aiming' || controller.mode === 'shot')
         ? 6.8
         : 4.8;
     cameraBase.lerp(desiredCamera, 1 - Math.exp(-delta * cameraRate));
-    const lookRate = finaleCameraEntry ? 22 : terminalScene ? 3.6 : 7.2;
+    const lookRate = finaleCameraEntry ? 22 : terminalScene ? 5.0 : 7.2;
     lookAt.lerp(desiredLook, 1 - Math.exp(-delta * lookRate));
     camera.position.copy(cameraBase);
     const modeShake = terminalScene ? 0 : focusTarget ? 0.08 : controller.mode === 'reading' ? 0.06 : 1;
@@ -2758,7 +2925,7 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
       setShowFinale(false);
       return;
     }
-    const timer = window.setTimeout(() => setShowFinale(true), 15200);
+    const timer = window.setTimeout(() => setShowFinale(true), 3800);
     return () => window.clearTimeout(timer);
   }, [mode]);
 
@@ -2885,22 +3052,7 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
 
       {mode === 'reading' && <SectionPanel controller={controller} />}
 
-      {mode === 'finale' && !showFinale && <motion.p className="finale-sequence" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>PARK / DISMOUNT / HELMET OFF / TAKE IN THE VIEW</motion.p>}
-
-      {mode === 'finale' && showFinale && <motion.section className="finale-overlay" initial={{ opacity: 0, y: 28 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1.1, ease: [0.16, 1, 0.3, 1] }} aria-labelledby="summit-title">
-        <p className="finale-kicker">SUMMIT / JOURNEY COMPLETE</p>
-        <h2 id="summit-title">THE VIEW<br />AFTER THE CLIMB.</h2>
-        <p className="finale-copy">Apoorva Rawat is a full-stack developer working across React, React Native, Node.js, and responsive product interfaces - currently with Prithu and independently delivering client websites.</p>
-        <div className="finale-links" aria-label="Contact channels">
-          <a href="mailto:apoorvarawat87@gmail.com">EMAIL</a>
-          <a href="https://github.com/aporrva" target="_blank" rel="noreferrer">GITHUB</a>
-          <a href="https://prithu.earth/" target="_blank" rel="noreferrer">PRITHU.EARTH</a>
-        </div>
-        <div className="finale-actions">
-          <button type="button" onClick={() => window.location.reload()}>RESTART RIDE</button>
-          <button type="button" onClick={() => setMenuOpen(true)}>VIEW SECTIONS</button>
-        </div>
-      </motion.section>}
+      {mode === 'finale' && !showFinale && <motion.p className="finale-sequence" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>KICKSTAND DOWN / SUMMIT VIEW</motion.p>}
     </AnimatePresence>
 
     {(mode === 'target' || mode === 'aiming') && <div className={'crosshair-3d' + (targetVulnerable && aimLocked ? ' is-hot' : '')} aria-hidden="true"><i /></div>}

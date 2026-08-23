@@ -954,38 +954,111 @@ function SummitVista() {
   const summit = useMemo(() => roadCurve.getPointAt(SUMMIT_PROGRESS), []);
   const tangent = useMemo(() => roadCurve.getTangentAt(SUMMIT_PROGRESS).normalize(), []);
   const side = useMemo(() => new THREE.Vector3(-tangent.z, 0, tangent.x).normalize(), [tangent]);
-  const mountains = useMemo(() => [
-    { lateral: -48, forward: 104, height: 55, radius: 31, color: '#637c89' },
-    { lateral: 42, forward: 112, height: 68, radius: 38, color: '#536c7b' },
-    { lateral: -8, forward: 132, height: 83, radius: 43, color: '#405a6d' },
-    { lateral: 77, forward: 155, height: 91, radius: 48, color: '#354e61' },
-    { lateral: -82, forward: 160, height: 88, radius: 46, color: '#385365' },
-  ].map((peak) => {
-    const position = summit.clone().addScaledVector(tangent, peak.forward).addScaledVector(side, peak.lateral);
-    position.y = summit.y + peak.height * 0.34;
-    return { ...peak, position };
-  }), [side, summit, tangent]);
   const heading = Math.atan2(tangent.x, tangent.z);
 
+  const mountains = useMemo(() => [
+    { lateral: -58, forward: 95, height: 62, radius: 34, color: '#68453b' },
+    { lateral: 52, forward: 108, height: 74, radius: 40, color: '#563842' },
+    { lateral: -12, forward: 135, height: 96, radius: 48, color: '#452b36' },
+    { lateral: 88, forward: 165, height: 105, radius: 54, color: '#38222d' },
+    { lateral: -92, forward: 170, height: 100, radius: 52, color: '#3c2532' },
+    { lateral: 0, forward: 210, height: 128, radius: 65, color: '#2b1924' },
+    { lateral: -140, forward: 190, height: 110, radius: 58, color: '#301c27' },
+    { lateral: 135, forward: 195, height: 112, radius: 60, color: '#2f1c28' },
+  ].map((peak) => {
+    const position = summit.clone().addScaledVector(tangent, peak.forward).addScaledVector(side, peak.lateral);
+    position.y = summit.y + peak.height * 0.34 - 12;
+    return { ...peak, position };
+  }), [side, summit, tangent]);
+
+  // Viewpoint wooden barrier railing posts along the cliff edge
+  const railingPosts = useMemo(() => Array.from({ length: 14 }, (_, i) => {
+    const angle = (i / 13) * Math.PI * 0.95 - Math.PI * 0.475;
+    const radius = 8.8;
+    return {
+      x: Math.sin(angle) * radius + 1.2,
+      z: Math.cos(angle) * radius + 0.8,
+      height: 1.05,
+    };
+  }), []);
+
+  // Tibetan prayer flags fluttering across the summit peaks
+  const flagColors = useMemo(() => ['#3b82f6', '#ffffff', '#ef4444', '#22c55e', '#eab308'], []);
+
   return <group>
-    <mesh position={[summit.x, summit.y + 0.035, summit.z]} rotation={[-Math.PI / 2, 0, heading]}>
-      <circleGeometry args={[8.6, 48]} />
-      <meshStandardMaterial color="#657276" roughness={0.96} />
+    {/* Scenic Summit Stone Terrace Platform */}
+    <mesh position={[summit.x, summit.y + 0.04, summit.z]} rotation={[-Math.PI / 2, 0, heading]}>
+      <circleGeometry args={[9.4, 64]} />
+      <meshStandardMaterial color="#383d40" roughness={0.92} metalness={0.05} />
     </mesh>
-    <group position={[summit.x, summit.y + 0.35, summit.z]} rotation={[0, heading, 0]}>
-      {[0, 1, 2, 3].map((index) => <mesh key={index} position={[-4.4, index * 0.26, 2.8]} scale={[0.7 - index * 0.1, 0.3, 0.6 - index * 0.08]} rotation={[0, index * 0.73, 0]} castShadow>
-        <dodecahedronGeometry args={[1, 0]} /><meshStandardMaterial color={index % 2 ? '#8b9795' : '#596968'} roughness={1} flatShading />
-      </mesh>)}
-      <mesh position={[-4.4, 1.4, 2.8]}>
-        <octahedronGeometry args={[0.18, 0]} /><meshStandardMaterial color="#ffdd91" emissive="#ffad45" emissiveIntensity={2.4} />
-      </mesh>
+    <mesh position={[summit.x, summit.y + 0.03, summit.z]} rotation={[-Math.PI / 2, 0, heading]}>
+      <ringGeometry args={[8.8, 9.8, 48]} />
+      <meshStandardMaterial color="#c89658" roughness={0.7} metalness={0.3} />
+    </mesh>
+
+    {/* Overlook Balcony Railing Posts & Top Rail */}
+    <group position={[summit.x, summit.y + 0.05, summit.z]} rotation={[0, heading, 0]}>
+      {railingPosts.map((post, i) => <group key={i} position={[post.x, 0, post.z]}>
+        <mesh position={[0, post.height / 2, 0]} castShadow>
+          <cylinderGeometry args={[0.07, 0.09, post.height, 8]} />
+          <meshStandardMaterial color="#5c3d2e" roughness={0.88} />
+        </mesh>
+        <mesh position={[0, post.height, 0]}>
+          <sphereGeometry args={[0.09, 8, 8]} />
+          <meshStandardMaterial color="#ffd57e" roughness={0.3} metalness={0.8} />
+        </mesh>
+      </group>)}
+
+      {/* Main Sacred Himalayan Stone Cairns (Lhatho) with glowing amber relics */}
+      <group position={[-4.6, 0.3, 2.5]}>
+        {[0, 1, 2, 3, 4].map((index) => <mesh key={index} position={[0, index * 0.28, 0]} scale={[0.85 - index * 0.12, 0.32, 0.75 - index * 0.1]} rotation={[0, index * 0.85, 0]} castShadow>
+          <dodecahedronGeometry args={[1, 0]} />
+          <meshStandardMaterial color={index % 2 ? '#928479' : '#61544b'} roughness={0.98} flatShading />
+        </mesh>)}
+        <mesh position={[0, 1.6, 0]}>
+          <octahedronGeometry args={[0.26, 0]} />
+          <meshStandardMaterial color="#ffe891" emissive="#ff9d2e" emissiveIntensity={3.8} toneMapped={false} />
+        </mesh>
+        <pointLight position={[0, 1.6, 0]} color="#ffb03a" intensity={8} distance={9} />
+      </group>
+
+      {/* Right Side Stone Beacon Cairn */}
+      <group position={[4.8, 0.3, 2.2]}>
+        {[0, 1, 2, 3].map((index) => <mesh key={index} position={[0, index * 0.26, 0]} scale={[0.7 - index * 0.1, 0.28, 0.6 - index * 0.08]} rotation={[0, -index * 0.75, 0]} castShadow>
+          <dodecahedronGeometry args={[1, 0]} />
+          <meshStandardMaterial color={index % 2 ? '#887c72' : '#584c44'} roughness={0.98} flatShading />
+        </mesh>)}
+        <mesh position={[0, 1.35, 0]}>
+          <octahedronGeometry args={[0.22, 0]} />
+          <meshStandardMaterial color="#ffe891" emissive="#ff9d2e" emissiveIntensity={3.2} toneMapped={false} />
+        </mesh>
+        <pointLight position={[0, 1.35, 0]} color="#ffb03a" intensity={6} distance={8} />
+      </group>
+
+      {/* Tibetan Prayer Flag Banners stringing across the overlook */}
+      {Array.from({ length: 18 }, (_, i) => {
+        const t = i / 17;
+        const x = THREE.MathUtils.lerp(-4.4, 4.6, t);
+        const z = THREE.MathUtils.lerp(2.4, 2.1, t);
+        const sag = Math.sin(t * Math.PI) * 0.55;
+        const y = 1.65 - sag;
+        const color = flagColors[i % flagColors.length];
+        return <mesh key={'flag-' + i} position={[x, y, z]} rotation={[0.1, 0, Math.sin(i * 1.2) * 0.12]}>
+          <planeGeometry args={[0.32, 0.24]} />
+          <meshStandardMaterial color={color} roughness={0.65} side={THREE.DoubleSide} />
+        </mesh>;
+      })}
     </group>
+
+    {/* Majestic Himalayan Mountain Vista with Golden Twilight Snow Caps */}
     {mountains.map((peak, index) => <group key={index} position={peak.position}>
       <mesh scale={[peak.radius, peak.height, peak.radius]} rotation={[0, index * 0.43, 0]}>
-        <coneGeometry args={[1, 1, 5, 1]} /><meshStandardMaterial color={peak.color} roughness={1} flatShading />
+        <coneGeometry args={[1, 1, 6, 1]} />
+        <meshStandardMaterial color={peak.color} roughness={0.95} flatShading />
       </mesh>
-      <mesh position={[0, peak.height * 0.33, 0]} scale={[peak.radius * 0.43, peak.height * 0.34, peak.radius * 0.43]} rotation={[0, index * 0.43, 0]}>
-        <coneGeometry args={[1, 1, 5, 1]} /><meshStandardMaterial color={index % 2 ? '#e8ece7' : '#cfdadd'} roughness={0.9} flatShading />
+      <mesh position={[0, peak.height * 0.33, 0]} scale={[peak.radius * 0.44, peak.height * 0.34, peak.radius * 0.44]} rotation={[0, index * 0.43, 0]}>
+        <coneGeometry args={[1, 1, 6, 1]} />
+        <meshStandardMaterial color={index % 2 ? '#ffebd6' : '#ffd7bd'} emissive="#8a4b2a" emissiveIntensity={0.25} roughness={0.8} flatShading />
       </mesh>
     </group>)}
   </group>;
@@ -1329,15 +1402,15 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       // In finale, gun is holstered
       if (gunGroup) gunGroup.visible = false;
 
-      const sideX = -0.22 * dismountProgress;
-      const sideZ = 1.25 * dismountProgress;
+      const sideX = -0.32 * dismountProgress;
+      const sideZ = 1.38 * dismountProgress;
       const walkWeight = Math.sin(Math.PI * walkProgress);
       const walkStride = Math.sin(finaleElapsed * 6.8) * walkWeight;
 
-      // Rider root position & rotation
-      const riderTargetX = THREE.MathUtils.lerp(sideX, 4.8, walkProgress);
-      const riderTargetZ = THREE.MathUtils.lerp(sideZ, 0.55, walkProgress);
-      const riderTargetY = -0.05 * dismountProgress + Math.abs(walkStride) * 0.025;
+      // Rider root position & rotation: steps down from the saddle to the road pavement
+      const riderTargetX = THREE.MathUtils.lerp(sideX, 4.6, walkProgress);
+      const riderTargetZ = THREE.MathUtils.lerp(sideZ, 0.65, walkProgress);
+      const riderTargetY = -0.14 * dismountProgress + Math.abs(walkStride) * 0.035;
 
       riderGroup.position.set(riderTargetX, riderTargetY, riderTargetZ);
       riderGroup.rotation.x = -0.065 * parkingStand * dismountProgress;
@@ -2094,14 +2167,15 @@ function RouteTarget({
 }
 
 function Scene({ controller, drive, lowQuality }: { controller: RideController; drive: DriveRef; lowQuality: boolean }) {
+  const isFinale = controller.mode === 'finale';
   return <>
-    <color attach="background" args={[controller.mode === 'finale' ? '#7892a0' : '#657d8b']} />
-    <fog attach="fog" args={['#708592', 26, controller.mode === 'finale' ? 245 : 175]} />
-    <ambientLight intensity={0.82} color="#8cb7cc" />
-    <hemisphereLight args={['#9fc6da', '#263a31', 1.25]} />
-    <directionalLight position={[-28, 52, 390]} color="#ffc37c" intensity={3.1} castShadow shadow-mapSize={lowQuality ? 512 : 1024} shadow-bias={-0.00025} />
+    <color attach="background" args={[isFinale ? '#cc6c48' : '#657d8b']} />
+    <fog attach="fog" args={[isFinale ? '#8c483a' : '#708592', isFinale ? 18 : 26, isFinale ? 340 : 175]} />
+    <ambientLight intensity={isFinale ? 1.15 : 0.82} color={isFinale ? '#f8b496' : '#8cb7cc'} />
+    <hemisphereLight args={[isFinale ? '#f8be8c' : '#9fc6da', isFinale ? '#3c1e28' : '#263a31', isFinale ? 1.45 : 1.25]} />
+    <directionalLight position={[-38, 48, 410]} color={isFinale ? '#ffa45a' : '#ffc37c'} intensity={isFinale ? 4.2 : 3.1} castShadow shadow-mapSize={lowQuality ? 512 : 1024} shadow-bias={-0.00025} />
     <pointLight position={[3, 5, -70]} color="#ff8158" intensity={2.2} distance={18} />
-    <Sky distance={450000} sunPosition={[-20, 22, 120]} inclination={0.46} azimuth={0.18} turbidity={5.2} rayleigh={1.2} mieCoefficient={0.008} mieDirectionalG={0.84} />
+    <Sky distance={450000} sunPosition={isFinale ? [-28, 12, 140] : [-20, 22, 120]} inclination={isFinale ? 0.58 : 0.46} azimuth={0.18} turbidity={isFinale ? 7.4 : 5.2} rayleigh={isFinale ? 2.1 : 1.2} mieCoefficient={0.008} mieDirectionalG={0.84} />
     <Atmosphere />
     <Terrain />
     <Road />
@@ -2117,6 +2191,16 @@ function Scene({ controller, drive, lowQuality }: { controller: RideController; 
       color="#f8d7a5"
       noise={2.4}
     />
+    {isFinale && <Sparkles
+      position={[32, 28, 780]}
+      count={lowQuality ? 60 : 140}
+      scale={[48, 24, 48]}
+      size={4.8}
+      speed={0.35}
+      opacity={0.85}
+      color="#ffd67d"
+      noise={1.8}
+    />}
     <RideRig controller={controller} drive={drive} />
     {PORTFOLIO_STOPS.map((portfolioStop, index) => {
       const status: TargetStatus = controller.completedStops.includes(index)

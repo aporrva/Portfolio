@@ -1513,7 +1513,7 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       }
     }
 
-    const movingMode = ['riding', 'target', 'aiming', 'shot', 'reading', 'summit'].includes(controller.mode);
+    const movingMode = ['riding', 'target', 'aiming', 'summit'].includes(controller.mode);
     const controlMode = ['riding', 'target', 'aiming', 'summit'].includes(controller.mode);
     if ((controller.mode === 'shot' || controller.mode === 'reading') && !controller.previewing) runtime.targetHit = true;
 
@@ -1529,7 +1529,7 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     let desiredVelocity = movingMode ? CRUISE_SPEED + (1 - CRUISE_SPEED) * throttle : 0;
 
     if (controller.mode === 'aiming' && !runtime.targetHit) desiredVelocity = Math.min(desiredVelocity, AIM_CRAWL_SPEED);
-    if (controller.mode === 'shot' || controller.mode === 'reading') desiredVelocity = 0.28;
+    if (controller.mode === 'shot' || controller.mode === 'reading') desiredVelocity = 0;
 
     const currentDistance = runtime.progress * ROAD_LENGTH;
     const summitRemaining = SUMMIT_DISTANCE - currentDistance;
@@ -1582,7 +1582,7 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     if (controller.mode === 'summit') nextProgress = Math.min(nextProgress, SUMMIT_PROGRESS);
     runtime.progress = THREE.MathUtils.clamp(nextProgress, RIDE_START_PROGRESS, SUMMIT_PROGRESS);
 
-    if (activeStop && !runtime.targetHit) {
+    if (activeStop && !runtime.targetHit && (controller.mode === 'riding' || controller.mode === 'target' || controller.mode === 'aiming')) {
       const distanceToTarget = activeStop.distance - runtime.progress * ROAD_LENGTH;
       const approach = THREE.MathUtils.clamp((32 - distanceToTarget) / 22, 0, 1);
       controller.reportApproach(controller.activeIndex, approach, distanceToTarget);

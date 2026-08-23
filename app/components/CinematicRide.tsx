@@ -2,7 +2,16 @@
 
 import { AnimatePresence, motion } from 'framer-motion';
 import gsap from 'gsap';
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { Canvas, ThreeEvent, useFrame, useThree } from '@react-three/fiber';
 import { AdaptiveDpr, PerformanceMonitor, Sky, Sparkles, useGLTF } from '@react-three/drei';
 import { Bloom, EffectComposer, SMAA, Vignette } from '@react-three/postprocessing';
@@ -10,6 +19,12 @@ import * as THREE from 'three';
 
 type RideState = 'intro' | 'countdown' | 'riding' | 'target' | 'aiming' | 'shot' | 'reading' | 'summit' | 'finale';
 type SectionId = 'skills' | 'about' | 'experience' | 'projects' | 'resume' | 'contact';
+
+type PortfolioGroup = {
+  label: string;
+  lines: string[];
+  links?: Array<{ label: string; href: string }>;
+};
 
 type PortfolioStop = {
   id: SectionId;
@@ -21,7 +36,7 @@ type PortfolioStop = {
   signSubtitle: string;
   eyebrow: string;
   heading: [string, string];
-  groups: Array<{ label: string; lines: string[] }>;
+  groups: PortfolioGroup[];
   note: string;
 };
 
@@ -39,6 +54,7 @@ type RideController = {
   setAimLocked: (value: boolean) => void;
   setTargetVulnerable: (value: boolean) => void;
   mute: boolean;
+  audioReady: boolean;
   setMute: (value: boolean) => void;
   mode: RideState;
   countdown: number;
@@ -60,6 +76,7 @@ type RideController = {
   activeStop: PortfolioStop | null;
   panelStop: PortfolioStop | null;
   previewing: boolean;
+  previewReturnMode: RideState;
 };
 
 type DriveRuntime = {
@@ -71,6 +88,9 @@ type DriveRuntime = {
   wheelAngle: number;
   pointerX: number;
   pointerY: number;
+  touchSteer: number;
+  touchThrottle: boolean;
+  touchBrake: boolean;
   mouseThrottle: boolean;
   gestureThrottle: number;
   forward: boolean;
@@ -96,6 +116,17 @@ const AIM_CRAWL_SPEED = 0.20;
 const TARGET_LOCK_DISTANCE = 12.0;
 const RIDE_START_DISTANCE = 25;
 const SUMMIT_DISTANCE = 880;
+const SUN_POSITION: [number, number, number] = [-24, 75, 920];
+const MUSIC_STEP_SECONDS = 0.56;
+const MUSIC_SCHEDULER_MS = 50;
+const MUSIC_LOOKAHEAD_SECONDS = 0.14;
+const MUSIC_MELODY = [
+  220, 261.63, 329.63, 261.63,
+  174.61, 220, 261.63, 220,
+  196, 246.94, 293.66, 246.94,
+  164.81, 207.65, 246.94, 207.65,
+];
+const MUSIC_ROOTS = [110, 87.31, 98, 82.41];
 
 const roadCurve = new THREE.CatmullRomCurve3([
   new THREE.Vector3(-6, 0, -100),
@@ -132,7 +163,7 @@ const stop = (
   signSubtitle: string,
   eyebrow: string,
   heading: [string, string],
-  groups: Array<{ label: string; lines: string[] }>,
+  groups: PortfolioGroup[],
   note: string,
 ): PortfolioStop => ({
   id,
@@ -159,103 +190,156 @@ function getEffectiveStop(index: number, distances?: number[]): PortfolioStop | 
   };
 }
 
-const PORTFOLIO_STOPS: PortfolioStop[] = [
-  stop(
-    'about',
-    'ABOUT',
-    '01',
-    90,
-    -1,
-    'MEET THE RIDER',
-    'RIDER PROFILE',
-    ['DESIGN THINKING.', 'ENGINEERING DRIVE.'],
-    [
-      { label: 'PROFILE', lines: ['Full-stack developer', 'Creative technologist'] },
-      { label: 'APPROACH', lines: ['Design X engineering', 'Story-led interaction'] },
-      { label: 'FOCUS', lines: ['Useful products', 'Memorable interfaces'] },
-    ],
-    'I turn ambitious ideas into clear, usable experiences with personality.'
-  ),
-  stop(
-    'skills',
-    'SKILLS',
-    '02',
-    180,
-    1,
-    'UNLOCK THE TOOLKIT',
-    'SKILLS UNLOCKED',
-    ['THE TOOLKIT', 'BEHIND THE RIDE.'],
-    [
-      { label: 'FRONTEND', lines: ['React', 'Next.js', 'TypeScript'] },
-      { label: '3D / MOTION', lines: ['Three.js', 'React Three Fiber', 'GSAP'] },
-      { label: 'BACKEND', lines: ['Node.js', 'APIs', 'Databases'] },
-    ],
-    'A practical stack for expressive, production-ready digital products.'
-  ),
-  stop(
-    'experience',
-    'EXPERIENCE',
-    '03',
-    270,
-    -1,
-    'TRACE THE JOURNEY',
-    'EXPERIENCE UNLOCKED',
-    ['BUILT THROUGH', 'REAL DELIVERY.'],
-    [
-      { label: 'ENGINEERING', lines: ['Frontend systems', 'Typed architecture'] },
-      { label: 'PRODUCT', lines: ['Full-stack workflows', 'API-driven applications'] },
-      { label: 'DELIVERY', lines: ['Concept to launch', 'Performance and polish'] },
-    ],
-    'Hands-on experience across product thinking, implementation, and refinement.'
-  ),
-  stop(
-    'projects',
-    'PROJECTS',
-    '04',
-    360,
-    1,
-    'OPEN THE GARAGE',
-    'PROJECT DATABASE',
-    ['SELECTED WORK.', 'MADE TO MOVE.'],
-    [
-      { label: 'IMMERSIVE WEB', lines: ['3D Ride Portfolio', 'Three.js experience'] },
-      { label: 'PRODUCT BUILDS', lines: ['Responsive applications', 'End-to-end workflows'] },
-      { label: 'INTERACTION', lines: ['Motion systems', 'Accessible interfaces'] },
-    ],
-    'Projects where interaction, technology, and a strong visual point of view meet.'
-  ),
-  stop(
-    'resume',
-    'RESUME',
-    '05',
-    450,
-    -1,
-    'VIEW THE RECORD',
-    'RESUME UNLOCKED',
-    ['THE ROUTE.', 'AT A GLANCE.'],
-    [
-      { label: 'CORE', lines: ['React / TypeScript', 'Node.js / APIs'] },
-      { label: 'CREATIVE', lines: ['Three.js / WebGL', 'GSAP / Motion'] },
-      { label: 'PRACTICE', lines: ['Databases / Accessibility', 'Performance'] },
-    ],
-    'A compact view of the capabilities behind the work.'
-  ),
-  stop(
-    'contact',
-    'CONTACT',
-    '06',
-    540,
-    1,
-    'START A CONVERSATION',
-    'FINAL CHECKPOINT',
-    ["LET'S BUILD", "WHAT'S NEXT."],
-    [
-      { label: 'COLLABORATE', lines: ['Product experiences', 'Interactive platforms'] },
-      { label: 'CONNECT', lines: ['Email', 'LinkedIn'] },
-      { label: 'FOLLOW', lines: ['GitHub', 'Selected work'] },
-    ],
-    'The road continues with the right people and the right idea.'
-  ),
+const PORTFOLIO_STOPS: PortfolioStop[] = [stop(
+  'about',
+  'ABOUT',
+  '01',
+  90,
+  -1,
+  'MEET THE RIDER',
+  'ABOUT MYSELF',
+  ['APOORVA RAWAT', ""],
+  [
+    { label: 'PROFILE', lines: ['Full-stack Software Engineer', 'App Developer', 'Web Developer'] },
+    { label: 'PERSONAL DETAILS', lines: ['21 Years', 'Female'] },
+    { label: 'SPECIALISM', lines: ['React', 'React Native', 'Express.js'] },
+  ],
+  'I build production-ready web experiences and bring the communication, problem-solving, and mentorship skills of a former teacher.'
+),
+
+stop(
+  'skills',
+  'SKILLS',
+  '02',
+  180,
+  1,
+  'THROUGH THE JOURNEY',
+  'SKILLS UNLOCKED',
+  ['THE TOOLKIT', 'BEHIND THE RIDE.'],
+  [
+    { label: 'FRONTEND', lines: ['HTML', 'CSS', 'JavaScript', 'React', 'TypeScript', 'Tailwind CSS', 'React Native', 'Next.js'] },
+    { label: 'BACKEND', lines: ['Node.js & Express', 'REST APIs', 'EmailJS', 'MySQL', 'Django'] },
+    { label: 'TOOLS', lines: ['Git', 'GitHub', 'Figma', 'Netlify'] },
+  ],
+  'A practical full-stack toolkit for responsive interfaces, API-integrated products, and maintainable component systems.'
+),
+
+stop(
+  'experience',
+  'EXPERIENCE',
+  '03',
+  270,
+  -1,
+  'TRACE THE JOURNEY',
+  'EXPERIENCE UNLOCKED',
+  ['BUILT THROUGH', 'REAL EXPERIENCE.'],
+  [
+    {
+      label: 'PRITHU / CURRENT',
+      lines: ['Currently working with Prithu'],
+      links: [{ label: 'VISIT PRITHU.EARTH', href: 'https://prithu.earth/' }],
+    },
+    {
+      label: 'FREELANCE / SEP 2025-PRESENT',
+      lines: ['Worked in Ethereal Designs'],
+      links: [{ label: 'VISIT ETHEREALDESIGN.IO', href: 'https://etherealdesign.io/' }],
+    },
+    {
+      label: '2023-2025',
+      lines: ['Chemistry Teacher', 'Lessons, experiments & mentoring'],
+    },
+  ],
+  'Currently contributing at Prithu while continuing freelance web development, following two years of teaching at Vidyatri Public School, Kotdwar.'
+),
+
+stop(
+  'projects',
+  'PROJECTS',
+  '04',
+  360,
+  1,
+  'OPEN THE GARAGE',
+  'PROJECT DATABASE',
+  ['SELECTED WORK.', 'BUILT TO LAST.'],
+  [
+    {
+      label: 'PRITHU.EARTH',
+      lines: ['Climate-tech company website', 'Sole end-to-end website build', 'High-integrity carbon ecosystems'],
+      links: [{ label: 'LIVE SITE', href: 'https://prithu.earth/' }],
+    },
+    {
+      label: 'ETHREAL DESIGN',
+      lines: ['Creative digital agency', 'React / TypeScript / Next.js'],
+      links: [
+        { label: 'LIVE SITE', href: 'https://etherealdesign.io/' },
+      ],
+    },
+    {
+      label: 'MANI ARTISAN JEWELLERY',
+      lines: ['Full-featured online shop', 'Next.js / Tailwind / React'],
+      links: [
+        { label: 'LIVE SITE', href: 'https://mani-artisan-jewellery.netlify.app/' },
+        { label: 'GITHUB', href: 'https://github.com/aporrva/Mani-Artisan-Jewellery' },
+      ],
+    },
+    {
+      label: 'FORM FILLING WEBSITE',
+      lines: ['Secure, user-friendly forms', 'React / Express / Tailwind'],
+      links: [
+        { label: 'LIVE SITE', href: 'https://form-filling-website.netlify.app/' },
+        { label: 'GITHUB', href: 'https://github.com/aporrva/Form-Filling-Website' },
+      ],
+    },
+  ],
+  'Selected work from my experience, led by Prithu.earth — independently delivered as a complete website project.'
+),
+
+stop(
+  'resume',
+  'RESUME',
+  '05',
+  450,
+  -1,
+  'VIEW THE RECORD',
+  'RESUME UNLOCKED',
+  ['THE ROUTE.', 'AT A GLANCE.'],
+  [
+    { label: 'FRONTEND', lines: ['React / React Native', 'Next.js / TypeScript', 'Responsive UI systems'] },
+    { label: 'BACKEND', lines: ['Node.js / Express', 'REST APIs / EmailJS', 'MySQL'] },
+    { label: 'EDUCATION', lines: ['B.Sc. Mathematics (PCM)'] },
+    { label: 'ACHIEVEMENTS', lines: ['District-Level High Jumper', "University's Top Long and High Jumper", 'District-Level Basketball Player'] },
+  ],
+  'Full-stack engineering, component architecture, API handling, clean state management, responsive layouts, and interactive UX.'
+),
+
+stop(
+  'contact',
+  'CONTACT',
+  '06',
+  540,
+  1,
+  'START A CONVERSATION',
+  'FINAL CHECKPOINT',
+  ["LET'S BUILD", "WHAT'S NEXT."],
+  [
+    {
+      label: 'EMAIL',
+      lines: ['apoorvarawat87@gmail.com'],
+      links: [{ label: 'SEND EMAIL', href: 'mailto:apoorvarawat87@gmail.com' }],
+    },
+    {
+      label: 'GITHUB',
+      lines: ['github.com/aporrva'],
+      links: [{ label: 'VIEW PROFILE', href: 'https://github.com/aporrva' }],
+    },
+    {
+      label: 'PORTFOLIO',
+      lines: ['apoorva-rawat.in'],
+    },
+    { label: 'BASED IN', lines: ['Kotdwara, Uttarakhand', 'India'] },
+  ],
+  'Open to thoughtful freelance and full-stack opportunities where strong engineering and clear communication both matter.'
+),
 ];
 function createDriveRuntime(): DriveRuntime {
   return {
@@ -267,6 +351,9 @@ function createDriveRuntime(): DriveRuntime {
     wheelAngle: 0,
     pointerX: 0,
     pointerY: 0,
+    touchSteer: 0,
+    touchThrottle: false,
+    touchBrake: false,
     mouseThrottle: false,
     gestureThrottle: 0,
     forward: false,
@@ -389,7 +476,8 @@ function useRideController(): RideController {
   const [missMessage, setMissMessage] = useState('');
   const [rideReset, setRideReset] = useState(0);
   const [checkpointReset, setCheckpointReset] = useState(0);
-  const [mute, setMute] = useState(false);
+  const [mute, setMuteState] = useState(false);
+  const [audioReady, setAudioReady] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [completedStops, setCompletedStops] = useState<number[]>([]);
   const [targetQueue, setTargetQueue] = useState<number[]>([0, 1, 2, 3, 4, 5]);
@@ -410,11 +498,24 @@ function useRideController(): RideController {
   const targetVulnerableRef = useRef(false);
   const targetDistanceRef = useRef(initialDistance);
   const contextRef = useRef<AudioContext | null>(null);
+  const resumePromiseRef = useRef<Promise<void> | null>(null);
+  const masterRef = useRef<GainNode | null>(null);
+  const limiterRef = useRef<DynamicsCompressorNode | null>(null);
+  const disposedRef = useRef(false);
+  const soundTimeoutsRef = useRef<Set<number>>(new Set());
   const engineRef = useRef<{
     low: OscillatorNode;
+    mid: OscillatorNode;
     high: OscillatorNode;
     gain: GainNode;
     filter: BiquadFilterNode;
+  } | null>(null);
+  const musicRef = useRef<{
+    gain: GainNode;
+    filter: BiquadFilterNode;
+    timer: number;
+    step: number;
+    nextNoteTime: number;
   } | null>(null);
   const mainTimeline = useRef<gsap.core.Timeline | null>(null);
   const reportedApproach = useRef(0);
@@ -427,56 +528,234 @@ function useRideController(): RideController {
   previewingRef.current = previewing;
 
   function getAudioContext() {
-    if (typeof window === 'undefined') return null;
+    if (disposedRef.current || typeof window === 'undefined') return null;
     const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) return null;
-    const context = contextRef.current ?? new AudioContextClass();
+    const existing = contextRef.current;
+    if (existing && existing.state !== 'closed') return existing;
+    const context = new AudioContextClass();
+    context.addEventListener('statechange', () => {
+      if (!disposedRef.current && contextRef.current === context) {
+        setAudioReady(context.state === 'running');
+      }
+    });
     contextRef.current = context;
-    if (context.state === 'suspended') void context.resume();
     return context;
+  }
+
+  function resumeAudioContext(context: AudioContext) {
+    if (context.state === 'running') return Promise.resolve();
+    if (context.state === 'closed') return Promise.reject(new Error('Audio context is closed'));
+    if (resumePromiseRef.current) return resumePromiseRef.current;
+    const promise = context.resume().then(() => undefined);
+    resumePromiseRef.current = promise;
+    const clearResumePromise = () => {
+      if (resumePromiseRef.current === promise) resumePromiseRef.current = null;
+    };
+    void promise.then(clearResumePromise, clearResumePromise);
+    return promise;
+  }
+
+  function getMasterOutput(context: AudioContext) {
+    if (masterRef.current) return masterRef.current;
+    const master = context.createGain();
+    const limiter = context.createDynamicsCompressor();
+    master.gain.value = muteRef.current ? 0.0001 : 0.85;
+    limiter.threshold.value = -16;
+    limiter.knee.value = 18;
+    limiter.ratio.value = 4;
+    limiter.attack.value = 0.006;
+    limiter.release.value = 0.24;
+    master.connect(limiter).connect(context.destination);
+    masterRef.current = master;
+    limiterRef.current = limiter;
+    return master;
+  }
+
+  function updateMaster() {
+    const context = contextRef.current;
+    const master = masterRef.current;
+    if (!context || !master || context.state === 'closed') return;
+    master.gain.setTargetAtTime(muteRef.current ? 0.0001 : 0.85, context.currentTime, 0.025);
   }
 
   function updateEngine(speedValue: number) {
     const engine = engineRef.current;
     const context = contextRef.current;
     if (!engine || !context || context.state === 'closed') return;
-    const active = ['riding', 'target', 'aiming', 'shot', 'reading', 'summit'].includes(modeRef.current);
+    const active = ['countdown', 'riding', 'target', 'aiming', 'shot', 'reading', 'summit'].includes(modeRef.current);
     const now = context.currentTime;
-    const level = !muteRef.current && active ? 0.009 + speedValue * 0.031 : 0.0001;
-    engine.gain.gain.setTargetAtTime(level, now, 0.08);
-    engine.low.frequency.setTargetAtTime(48 + speedValue * 92, now, 0.055);
-    engine.high.frequency.setTargetAtTime(102 + speedValue * 215, now, 0.05);
-    engine.filter.frequency.setTargetAtTime(380 + speedValue * 1450, now, 0.07);
+    const level = !muteRef.current && active ? 0.024 + speedValue * 0.042 : 0.0001;
+    const fundamental = 62 + speedValue * 88;
+    engine.gain.gain.setTargetAtTime(level, now, 0.065);
+    engine.low.frequency.setTargetAtTime(fundamental, now, 0.055);
+    engine.mid.frequency.setTargetAtTime(fundamental * 2.03, now, 0.05);
+    engine.high.frequency.setTargetAtTime(fundamental * 4.08, now, 0.045);
+    engine.filter.frequency.setTargetAtTime(1100 + speedValue * 2500, now, 0.07);
   }
 
-  function ensureEngine() {
-    const context = getAudioContext();
-    if (!context || engineRef.current) return;
+  function ensureEngine(context: AudioContext) {
+    if (engineRef.current) return;
     const low = context.createOscillator();
+    const mid = context.createOscillator();
     const high = context.createOscillator();
     const filter = context.createBiquadFilter();
     const gain = context.createGain();
+    const lowMix = context.createGain();
+    const midMix = context.createGain();
+    const highMix = context.createGain();
     low.type = 'sawtooth';
+    mid.type = 'square';
     high.type = 'triangle';
-    low.frequency.value = 48;
-    high.frequency.value = 102;
+    low.frequency.value = 62;
+    mid.frequency.value = 126;
+    high.frequency.value = 253;
     filter.type = 'lowpass';
-    filter.frequency.value = 420;
-    filter.Q.value = 1.15;
+    filter.frequency.value = 1100;
+    filter.Q.value = 1.35;
     gain.gain.value = 0.0001;
-    low.connect(filter);
-    high.connect(filter);
-    filter.connect(gain).connect(context.destination);
+    lowMix.gain.value = 0.62;
+    midMix.gain.value = 0.25;
+    highMix.gain.value = 0.13;
+    low.connect(lowMix).connect(filter);
+    mid.connect(midMix).connect(filter);
+    high.connect(highMix).connect(filter);
+    filter.connect(gain).connect(getMasterOutput(context));
     low.start();
+    mid.start();
     high.start();
-    engineRef.current = { low, high, gain, filter };
+    engineRef.current = { low, mid, high, gain, filter };
     updateEngine(reportedSpeed.current);
+  }
+
+  function scheduleMusicTone(
+    context: AudioContext,
+    output: AudioNode,
+    frequency: number,
+    startAt: number,
+    duration: number,
+    type: OscillatorType,
+    peak: number,
+  ) {
+    const oscillator = context.createOscillator();
+    const envelope = context.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, startAt);
+    envelope.gain.setValueAtTime(0.0001, startAt);
+    envelope.gain.exponentialRampToValueAtTime(peak, startAt + Math.min(0.09, duration * 0.25));
+    envelope.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+    oscillator.connect(envelope).connect(output);
+    oscillator.onended = () => {
+      oscillator.disconnect();
+      envelope.disconnect();
+    };
+    oscillator.start(startAt);
+    oscillator.stop(startAt + duration + 0.04);
+  }
+
+  function scheduleMusicStep(startAt: number) {
+    const context = contextRef.current;
+    const music = musicRef.current;
+    if (!context || !music || context.state !== 'running' || muteRef.current || disposedRef.current) return;
+    const step = music.step % MUSIC_MELODY.length;
+    const chord = Math.floor(step / 4) % MUSIC_ROOTS.length;
+    scheduleMusicTone(context, music.filter, MUSIC_MELODY[step], startAt, 0.52, 'triangle', 0.055);
+    if (step % 2 === 0) {
+      scheduleMusicTone(context, music.filter, MUSIC_ROOTS[chord], startAt, 1.06, 'sine', 0.052);
+    }
+    if (step % 4 === 0) {
+      scheduleMusicTone(context, music.filter, MUSIC_ROOTS[chord] * 2, startAt, 2.05, 'sine', 0.018);
+      scheduleMusicTone(context, music.filter, MUSIC_ROOTS[chord] * 3, startAt, 1.8, 'triangle', 0.012);
+    }
+    music.step += 1;
+  }
+
+  function runMusicScheduler() {
+    const context = contextRef.current;
+    const music = musicRef.current;
+    if (!context || !music || context.state !== 'running' || muteRef.current || disposedRef.current) return;
+    if (music.nextNoteTime < context.currentTime + 0.01) {
+      music.nextNoteTime = context.currentTime + 0.05;
+    }
+    while (music.nextNoteTime < context.currentTime + MUSIC_LOOKAHEAD_SECONDS) {
+      scheduleMusicStep(music.nextNoteTime);
+      music.nextNoteTime += MUSIC_STEP_SECONDS;
+    }
+  }
+
+  function updateMusic() {
+    const context = contextRef.current;
+    const music = musicRef.current;
+    if (!context || !music || context.state === 'closed') return;
+    const now = context.currentTime;
+    const levelByMode: Partial<Record<RideState, number>> = {
+      countdown: 0.08,
+      riding: 0.15,
+      target: 0.13,
+      aiming: 0.1,
+      shot: 0.12,
+      reading: 0.09,
+      summit: 0.17,
+      finale: 0.14,
+    };
+    const level = muteRef.current ? 0.0001 : levelByMode[modeRef.current] ?? 0.0001;
+    music.gain.gain.setTargetAtTime(level, now, 0.28);
+    music.filter.frequency.setTargetAtTime(modeRef.current === 'aiming' ? 1250 : 2350, now, 0.35);
+  }
+
+  function ensureMusic(context: AudioContext) {
+    if (musicRef.current) return;
+    const filter = context.createBiquadFilter();
+    const gain = context.createGain();
+    filter.type = 'lowpass';
+    filter.frequency.value = 2350;
+    filter.Q.value = 0.72;
+    gain.gain.value = 0.0001;
+    filter.connect(gain).connect(getMasterOutput(context));
+    musicRef.current = {
+      gain,
+      filter,
+      step: 0,
+      nextNoteTime: context.currentTime + 0.05,
+      timer: window.setInterval(runMusicScheduler, MUSIC_SCHEDULER_MS),
+    };
+    runMusicScheduler();
+    updateMusic();
+  }
+
+  function activateAudio() {
+    const context = getAudioContext();
+    if (!context) return;
+    const start = () => {
+      if (disposedRef.current || contextRef.current !== context || context.state !== 'running') return;
+      ensureEngine(context);
+      ensureMusic(context);
+      updateMaster();
+      updateEngine(reportedSpeed.current);
+      updateMusic();
+      if (!muteRef.current) runMusicScheduler();
+      setAudioReady(true);
+    };
+    if (context.state === 'running') start();
+    else void resumeAudioContext(context).then(start).catch(() => {
+      if (!disposedRef.current) setAudioReady(false);
+    });
   }
 
   function transition(next: RideState) {
     modeRef.current = next;
     setMode(next);
     updateEngine(reportedSpeed.current);
+    updateMusic();
+  }
+
+  function setMute(value: boolean) {
+    muteRef.current = value;
+    setMuteState(value);
+    if (!value) activateAudio();
+    updateMaster();
+    updateEngine(reportedSpeed.current);
+    updateMusic();
   }
 
   function setAimLocked(value: boolean) {
@@ -491,10 +770,11 @@ function useRideController(): RideController {
   }
 
   function sound(freq: number, duration: number, type: OscillatorType = 'sine', volume = 0.035) {
-    if (muteRef.current || typeof window === 'undefined') return;
+    if (disposedRef.current || muteRef.current || typeof window === 'undefined') return;
     const context = getAudioContext();
     if (!context || context.state === 'closed') return;
-    try {
+    const play = () => {
+      if (disposedRef.current || contextRef.current !== context || muteRef.current || context.state !== 'running') return;
       const osc = context.createOscillator();
       const gain = context.createGain();
       const now = context.currentTime;
@@ -503,12 +783,32 @@ function useRideController(): RideController {
       gain.gain.setValueAtTime(volume, now);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
       osc.connect(gain);
-      gain.connect(context.destination);
+      gain.connect(getMasterOutput(context));
+      osc.onended = () => {
+        osc.disconnect();
+        gain.disconnect();
+      };
       osc.start(now);
       osc.stop(now + duration);
-    } catch {
-      // Audio autoplay policy fallback
-    }
+    };
+    if (context.state === 'running') play();
+    else void resumeAudioContext(context).then(play).catch(() => {
+      // Audio can be retried from the explicit header control.
+    });
+  }
+
+  function queueSound(
+    delay: number,
+    freq: number,
+    duration: number,
+    type: OscillatorType = 'sine',
+    volume = 0.035,
+  ) {
+    const timer = window.setTimeout(() => {
+      soundTimeoutsRef.current.delete(timer);
+      if (!disposedRef.current) sound(freq, duration, type, volume);
+    }, delay);
+    soundTimeoutsRef.current.add(timer);
   }
 
   function killTimelines() {
@@ -556,8 +856,8 @@ function useRideController(): RideController {
   }
 
   function reportVehicleSpeed(value: number) {
-    const next = THREE.MathUtils.clamp(value, 0, 1);
-    updateEngine(next);
+    const next = Math.max(0, value);
+    updateEngine(Math.min(next, 1));
     if (Math.abs(next - reportedSpeed.current) > 0.014 || next === 0) {
       reportedSpeed.current = next;
       setVehicleSpeed(next);
@@ -586,7 +886,7 @@ function useRideController(): RideController {
     setSpeed(0);
     setRideReset((value) => value + 1);
     transition('countdown');
-    ensureEngine();
+    activateAudio();
     sound(140, 0.12, 'square', 0.035);
 
     const timeline = gsap.timeline();
@@ -697,13 +997,26 @@ function useRideController(): RideController {
     setTargetProgress(1);
     sound(980, 0.08, 'sawtooth', 0.09);
     sound(135, 0.26, 'square', 0.095);
-    window.setTimeout(() => sound(540, 0.18, 'sine', 0.04), 90);
+    queueSound(90, 540, 0.18, 'sine', 0.04);
     window.setTimeout(() => {
       transition('reading');
     }, 720);
   }
 
   function continueRide() {
+    if (previewingRef.current) {
+      killTimelines();
+      previewingRef.current = false;
+      setPreviewing(false);
+      setPanelIndex(null);
+      if (modeRef.current !== returnModeRef.current) transition(returnModeRef.current);
+      setSpeed(returnSpeedRef.current);
+      if (returnSpeedRef.current === 0) {
+        reportedSpeed.current = 0;
+        setVehicleSpeed(0);
+      }
+      return;
+    }
     if (modeRef.current !== 'reading' && modeRef.current !== 'shot') return;
     killTimelines();
     const currentQueue = targetQueueRef.current;
@@ -760,20 +1073,28 @@ function useRideController(): RideController {
 
   function openSection(index: number) {
     if (index < 0 || index >= PORTFOLIO_STOPS.length) return;
-    if (modeRef.current === 'countdown' || modeRef.current === 'shot' || modeRef.current === 'reading') return;
+    if (modeRef.current === 'countdown' || modeRef.current === 'shot') return;
+    activateAudio();
+    if (previewingRef.current && (modeRef.current === 'reading' || modeRef.current === 'finale')) {
+      setPanelIndex(index);
+      return;
+    }
+    if (modeRef.current === 'reading') return;
     killTimelines();
-    returnModeRef.current = modeRef.current;
-    returnSpeedRef.current = modeRef.current === 'intro' || modeRef.current === 'finale' ? 0 : 1;
+    const sourceMode = modeRef.current;
+    returnModeRef.current = sourceMode;
+    returnSpeedRef.current = sourceMode === 'intro' || sourceMode === 'finale' ? 0 : 1;
     previewingRef.current = true;
     setPreviewing(true);
     setPanelIndex(index);
     setAimLocked(false);
     setTargetVulnerable(false);
-    transition('reading');
+    if (sourceMode !== 'finale') transition('reading');
     setSpeed(returnSpeedRef.current === 0 ? 0 : 0.2);
   }
 
   function openFinale() {
+    activateAudio();
     killTimelines();
     previewingRef.current = false;
     setPreviewing(false);
@@ -785,7 +1106,7 @@ function useRideController(): RideController {
     setVehicleSpeed(0);
     transition('finale');
     sound(196, 0.8, 'sine', 0.045);
-    window.setTimeout(() => sound(392, 1.1, 'sine', 0.03), 260);
+    queueSound(260, 392, 1.1, 'sine', 0.03);
   }
 
   function reachFinale() {
@@ -796,12 +1117,14 @@ function useRideController(): RideController {
     setVehicleSpeed(0);
     transition('finale');
     sound(196, 0.8, 'sine', 0.045);
-    window.setTimeout(() => sound(392, 1.1, 'sine', 0.03), 260);
+    queueSound(260, 392, 1.1, 'sine', 0.03);
   }
 
   useEffect(() => {
     muteRef.current = mute;
+    updateMaster();
     updateEngine(reportedSpeed.current);
+    updateMusic();
   }, [mute]);
 
   useEffect(() => {
@@ -820,19 +1143,31 @@ function useRideController(): RideController {
   }, []);
 
   useEffect(() => {
+    disposedRef.current = false;
     return () => {
+      disposedRef.current = true;
       mainTimeline.current?.kill();
+      soundTimeoutsRef.current.forEach((timer) => window.clearTimeout(timer));
+      soundTimeoutsRef.current.clear();
       const engine = engineRef.current;
       if (engine) {
-        try {
-          engine.low.stop();
-          engine.high.stop();
-        } catch {
-          // Audio context may already be closed during fast refresh.
-        }
+        [engine.low, engine.mid, engine.high].forEach((oscillator) => {
+          try {
+            oscillator.stop();
+          } catch {
+            // A source may already be stopped during Strict Mode or fast refresh.
+          }
+        });
       }
       engineRef.current = null;
-      if (contextRef.current && contextRef.current.state !== 'closed') void contextRef.current.close();
+      if (musicRef.current) window.clearInterval(musicRef.current.timer);
+      musicRef.current = null;
+      masterRef.current = null;
+      limiterRef.current = null;
+      resumePromiseRef.current = null;
+      const context = contextRef.current;
+      contextRef.current = null;
+      if (context && context.state !== 'closed') void context.close().catch(() => undefined);
     };
   }, []);
 
@@ -850,6 +1185,7 @@ function useRideController(): RideController {
     setAimLocked,
     setTargetVulnerable,
     mute,
+    audioReady,
     setMute,
     mode,
     countdown,
@@ -871,13 +1207,119 @@ function useRideController(): RideController {
     activeStop: getEffectiveStop(activeIndex, stopDistances),
     panelStop: panelIndex === null ? null : getEffectiveStop(panelIndex, stopDistances),
     previewing,
+    previewReturnMode: returnModeRef.current,
   };
 }
 
-function Road() {
+function createAsphaltTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const context = canvas.getContext('2d');
+  if (!context) return new THREE.Texture();
+
+  let seed = 1977;
+  const random = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+
+  context.fillStyle = '#282d30';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let index = 0; index < 9200; index += 1) {
+    const value = 34 + Math.floor(random() * 48);
+    const alpha = 0.08 + random() * 0.2;
+    const size = random() > 0.92 ? 2 : 1;
+    context.fillStyle = `rgba(${value}, ${value + 2}, ${value + 3}, ${alpha})`;
+    context.fillRect(random() * canvas.width, random() * canvas.height, size, size);
+  }
+
+  context.lineCap = 'round';
+  for (let crack = 0; crack < 28; crack += 1) {
+    let x = random() * canvas.width;
+    let y = random() * canvas.height;
+    context.beginPath();
+    context.moveTo(x, y);
+    for (let segment = 0; segment < 5; segment += 1) {
+      x += (random() - 0.5) * 34;
+      y += 9 + random() * 25;
+      context.lineTo(x, y);
+    }
+    context.strokeStyle = `rgba(7, 11, 13, ${0.11 + random() * 0.16})`;
+    context.lineWidth = 0.7 + random() * 1.1;
+    context.stroke();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(2.4, 1);
+  texture.anisotropy = 8;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  return texture;
+}
+
+function createSurfaceCurve(offset: number, elevation: number) {
+  const points = Array.from({ length: 220 }, (_, index) => {
+    const progress = (index / 219) * ROAD_END_PROGRESS;
+    const point = roadCurve.getPointAt(progress);
+    const tangent = roadCurve.getTangentAt(progress).normalize();
+    const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+    return point.addScaledVector(side, offset).add(new THREE.Vector3(0, elevation, 0));
+  });
+  return new THREE.CatmullRomCurve3(points);
+}
+
+function RoadGravel({ count }: { count: number }) {
+  const gravel = useRef<THREE.InstancedMesh>(null);
+  const stones = useMemo(() => Array.from({ length: count }, (_, index) => {
+    const progress = 0.008 + (index / count) * Math.max(0, ROAD_END_PROGRESS - 0.012);
+    const point = roadCurve.getPointAt(progress);
+    const tangent = roadCurve.getTangentAt(progress).normalize();
+    const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+    const direction = index % 2 === 0 ? 1 : -1;
+    const offset = 2.78 + ((index * 29) % 73) / 100;
+    const scale = 0.035 + ((index * 17) % 11) / 180;
+    return {
+      position: point.addScaledVector(side, direction * offset).add(new THREE.Vector3(0, 0.16, 0)),
+      rotation: [index * 0.71, index * 1.37, index * 0.43] as [number, number, number],
+      scale,
+    };
+  }), [count]);
+
+  useLayoutEffect(() => {
+    const object = new THREE.Object3D();
+    const color = new THREE.Color();
+    stones.forEach((stone, index) => {
+      object.position.copy(stone.position);
+      object.rotation.set(...stone.rotation);
+      object.scale.set(stone.scale * 1.7, stone.scale * 0.6, stone.scale);
+      object.updateMatrix();
+      gravel.current?.setMatrixAt(index, object.matrix);
+      gravel.current?.setColorAt(index, color.set(index % 3 === 0 ? '#8c7960' : index % 3 === 1 ? '#554d43' : '#b29a78'));
+    });
+    if (gravel.current) {
+      gravel.current.instanceMatrix.needsUpdate = true;
+      if (gravel.current.instanceColor) gravel.current.instanceColor.needsUpdate = true;
+    }
+  }, [stones]);
+
+  return <instancedMesh ref={gravel} args={[undefined, undefined, count]} castShadow receiveShadow>
+    <dodecahedronGeometry args={[1, 0]} />
+    <meshStandardMaterial vertexColors color="#786b59" roughness={1} />
+  </instancedMesh>;
+}
+
+function Road({ lowQuality }: { lowQuality: boolean }) {
   const road = useMemo(() => createRoadGeometry(5.2, 0.12, 0, ROAD_END_PROGRESS, true), []);
   const shoulder = useMemo(() => createRoadGeometry(7.2, 0.09, 0, ROAD_END_PROGRESS, true), []);
+  const asphalt = useMemo(() => createAsphaltTexture(), []);
+  const edgeLines = useMemo(() => [-2.52, 2.52].map((offset) => createSurfaceCurve(offset, 0.145)), []);
+  const tireTracks = useMemo(() => [-0.72, 0.72].map((offset) => createSurfaceCurve(offset, 0.142)), []);
   const localZ = useMemo(() => new THREE.Vector3(0, 0, 1), []);
+  useEffect(() => () => asphalt.dispose(), [asphalt]);
   const lines = useMemo(() => Array.from({ length: Math.floor((ROAD_LENGTH * ROAD_END_PROGRESS) / 7) }, (_, index) => {
     const distance = index * 7 + 4;
     const progress = THREE.MathUtils.clamp(distance / ROAD_LENGTH, 0, 1);
@@ -919,11 +1361,24 @@ function Road() {
 
   return <group>
     <mesh geometry={shoulder} receiveShadow>
-      <meshStandardMaterial color="#2d3033" roughness={0.94} depthWrite={true} depthTest={true} />
+      <meshStandardMaterial color="#4b443b" roughness={1} depthWrite={true} depthTest={true} />
     </mesh>
     <mesh geometry={road} receiveShadow>
-      <meshStandardMaterial color="#1f2225" roughness={0.84} metalness={0.06} depthWrite={true} depthTest={true} />
+      <meshStandardMaterial map={asphalt} color="#b9bec0" roughness={0.93} metalness={0.02} depthWrite={true} depthTest={true} />
     </mesh>
+    {tireTracks.map((curve, index) => <mesh key={'track-' + index}>
+      <tubeGeometry args={[curve, 360, 0.018, 5, false]} />
+      <meshBasicMaterial color="#0b1012" transparent opacity={0.26} depthWrite={false} polygonOffset polygonOffsetFactor={-2} />
+    </mesh>)}
+    {edgeLines.map((curve, index) => <mesh key={'edge-' + index} receiveShadow>
+      <tubeGeometry args={[curve, 360, 0.034, 6, false]} />
+      <meshStandardMaterial
+        color={index === 0 ? '#e9dec3' : '#f1e6cc'}
+        emissive="#806531"
+        emissiveIntensity={0.08}
+        roughness={0.72}
+      />
+    </mesh>)}
     {lines.map(({ point, quaternion }, index) => <mesh key={index} position={[point.x, point.y + 0.115, point.z]} quaternion={quaternion} receiveShadow>
       <boxGeometry args={[0.16, 0.02, 2.35]} /><meshStandardMaterial color="#e6c888" emissive="#64461e" emissiveIntensity={0.14} roughness={0.6} />
     </mesh>)}
@@ -935,6 +1390,7 @@ function Road() {
       <cylinderGeometry args={[0.045, 0.055, 0.74, 8]} />
       <meshStandardMaterial color="#5b6268" metalness={0.75} roughness={0.35} />
     </mesh>)}
+    <RoadGravel count={lowQuality ? 74 : 180} />
   </group>;
 }
 
@@ -1034,8 +1490,8 @@ function Atmosphere() {
     [-105, 66, 520, 7.5], [90, 70, 660, 8.0], [-85, 74, 800, 7.6], [75, 78, 910, 8.5],
   ] as const, []);
   return <group>
-    <mesh position={[-24, 75, 920]}><sphereGeometry args={[14, 32, 24]} /><meshBasicMaterial color="#ffc578" toneMapped={false} /></mesh>
-    <mesh position={[-24, 75, 920]} scale={1.8}><sphereGeometry args={[14, 32, 24]} /><meshBasicMaterial color="#ff9c63" transparent opacity={0.06} depthWrite={false} /></mesh>
+    <mesh position={SUN_POSITION}><sphereGeometry args={[14, 32, 24]} /><meshBasicMaterial color="#ffc578" toneMapped={false} /></mesh>
+    <mesh position={SUN_POSITION} scale={1.8}><sphereGeometry args={[14, 32, 24]} /><meshBasicMaterial color="#ff9c63" transparent opacity={0.06} depthWrite={false} /></mesh>
     {clouds.map(([x, y, z, scale], index) => <group key={index} position={[x, y, z]} scale={scale}>
       <mesh scale={[1.2, 0.28, 0.42]}><sphereGeometry args={[1, 20, 12]} /><meshStandardMaterial color="#d9e2df" transparent opacity={0.14} roughness={1} depthWrite={false} /></mesh>
       <mesh position={[0.7, 0.14, 0.1]} scale={[0.82, 0.22, 0.32]}><sphereGeometry args={[1, 20, 12]} /><meshStandardMaterial color="#e9e4d8" transparent opacity={0.11} roughness={1} depthWrite={false} /></mesh>
@@ -1160,38 +1616,474 @@ function SummitVista() {
 const BIKE_SCALE = 1.28;
 const WHEEL_RADIUS_WORLD = 0.495 * BIKE_SCALE;
 
-const STANDING_RIDER_POSITIONS: Record<string, [number, number, number]> = {
-  'Rider hips': [-0.38, 1.38, 0],
-  'Rider torso jacket': [-0.32, 1.78, 0],
-  'Shoulder left': [-0.28, 1.98, 0.25],
-  'Shoulder right': [-0.28, 1.98, -0.25],
-  'Rider neck': [-0.23, 2.13, 0],
-  'Jacket arm': [-0.28, 1.68, 0.31],
-  'Gloved forearm': [-0.28, 1.28, 0.32],
-  'Glove': [-0.24, 1.02, 0.32],
-  'Jacket arm.001': [-0.28, 1.68, -0.31],
-  'Gloved forearm.001': [-0.28, 1.28, -0.32],
-  'Glove.001': [-0.24, 1.02, -0.32],
-  'Riding thigh': [-0.36, 1.03, 0.18],
-  'Riding shin': [-0.35, 0.57, 0.18],
-  'Riding boot': [-0.24, 0.18, 0.18],
-  'Riding thigh.001': [-0.36, 1.03, -0.18],
-  'Riding shin.001': [-0.35, 0.57, -0.18],
-  'Riding boot.001': [-0.24, 0.18, -0.18],
-  'Rider scarf': [-0.36, 2.12, 0],
-};
-const STRAIGHTEN_RIDER_PARTS = new Set([
+
+const RIDER_PART_NAMES = [
+  'Rider hips', 'Rider torso jacket', 'Shoulder left', 'Shoulder right', 'Rider neck',
   'Jacket arm', 'Gloved forearm', 'Glove', 'Jacket arm.001', 'Gloved forearm.001', 'Glove.001',
   'Riding thigh', 'Riding shin', 'Riding boot', 'Riding thigh.001', 'Riding shin.001', 'Riding boot.001',
-]);
+  'Rider scarf',
+] as const;
+
+const HELMET_PART_NAMES = ['Rider helmet', 'Helmet crown', 'Helmet visor', 'Helmet rear'] as const;
+
+function resolveModelPart(root: THREE.Object3D, canonicalName: string) {
+  const part = root.getObjectByName(canonicalName)
+    ?? root.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(canonicalName));
+  if (part) part.name = canonicalName;
+  return part;
+}
+
+function createOrganicFaceGeometry() {
+  const geometry = new THREE.SphereGeometry(1, 48, 32);
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+
+  for (let index = 0; index < position.count; index += 1) {
+    const x = position.getX(index);
+    const y = position.getY(index);
+    const z = position.getZ(index);
+    const lowerFace = THREE.MathUtils.clamp(-y, 0, 1);
+    const jawTaper = 1 - lowerFace * 0.24;
+    const cheekSoftness = 1 + Math.exp(-Math.pow((y + 0.02) / 0.34, 2)) * 0.035;
+    position.setXYZ(index, x * (1 - lowerFace * 0.035), y, z * jawTaper * cheekSoftness);
+  }
+
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function makeStrand(points: Array<[number, number, number]>, radius: number, segments = 24) {
+  const curve = new THREE.CatmullRomCurve3(points.map((point) => new THREE.Vector3(...point)));
+  return new THREE.TubeGeometry(curve, segments, radius, 10, false);
+}
+
+function softenRiderMeshes(riderGroup: THREE.Group) {
+  const jacketMaterial = new THREE.MeshPhysicalMaterial({
+    color: '#242830',
+    roughness: 0.72,
+    metalness: 0,
+    clearcoat: 0.08,
+    clearcoatRoughness: 0.82,
+    sheen: 0.35,
+    sheenColor: '#744557',
+    sheenRoughness: 0.82,
+  });
+  const sleeveMaterial = new THREE.MeshStandardMaterial({ color: '#292a31', roughness: 0.78, metalness: 0 });
+  const pantsMaterial = new THREE.MeshStandardMaterial({ color: '#211f25', roughness: 0.88, metalness: 0 });
+  const gloveMaterial = new THREE.MeshStandardMaterial({ color: '#181a1f', roughness: 0.64, metalness: 0.02 });
+  const bootMaterial = new THREE.MeshPhysicalMaterial({
+    color: '#15171b', roughness: 0.55, metalness: 0.02, clearcoat: 0.12, clearcoatRoughness: 0.7,
+  });
+  const skinMaterial = new THREE.MeshStandardMaterial({ color: '#a96851', roughness: 0.74, metalness: 0 });
+  const scarfMaterial = new THREE.MeshStandardMaterial({ color: '#9f4051', roughness: 0.9, metalness: 0 });
+  const accentMaterial = new THREE.MeshStandardMaterial({ color: '#c78658', roughness: 0.56, metalness: 0.06 });
+
+  const fit = (
+    name: string,
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    scale: [number, number, number] = [1, 1, 1],
+  ) => {
+    const object = riderGroup.getObjectByName(name);
+    if (!(object instanceof THREE.Mesh)) return null;
+    object.geometry = geometry;
+    object.material = material;
+    object.scale.set(...scale);
+    object.castShadow = true;
+    object.receiveShadow = true;
+    return object;
+  };
+
+  fit('Rider hips', new THREE.SphereGeometry(1, 32, 24), pantsMaterial, [0.25, 0.2, 0.31]);
+
+  const torsoProfile = [
+    new THREE.Vector2(0.16, -0.39),
+    new THREE.Vector2(0.2, -0.35),
+    new THREE.Vector2(0.22, -0.25),
+    new THREE.Vector2(0.205, -0.12),
+    new THREE.Vector2(0.22, 0.04),
+    new THREE.Vector2(0.265, 0.21),
+    new THREE.Vector2(0.24, 0.33),
+    new THREE.Vector2(0.15, 0.39),
+  ];
+  const torsoObj = fit(
+    'Rider torso jacket',
+    new THREE.LatheGeometry(torsoProfile, 36),
+    jacketMaterial,
+    [0.74, 1, 1],
+  );
+
+  fit('Shoulder left', new THREE.SphereGeometry(1, 28, 20), jacketMaterial, [0.115, 0.13, 0.145]);
+  fit('Shoulder right', new THREE.SphereGeometry(1, 28, 20), jacketMaterial, [0.115, 0.13, 0.145]);
+  fit('Rider neck', new THREE.CapsuleGeometry(0.068, 0.035, 8, 18), skinMaterial);
+
+  for (const name of ['Jacket arm', 'Jacket arm.001']) {
+    fit(name, new THREE.CapsuleGeometry(0.09, 0.39, 8, 18), jacketMaterial);
+  }
+  for (const name of ['Gloved forearm', 'Gloved forearm.001']) {
+    fit(name, new THREE.CapsuleGeometry(0.068, 0.49, 8, 18), sleeveMaterial);
+  }
+  for (const name of ['Glove', 'Glove.001']) {
+    fit(name, new THREE.SphereGeometry(1, 24, 18), gloveMaterial, [0.1, 0.075, 0.087]);
+  }
+  for (const name of ['Riding thigh', 'Riding thigh.001']) {
+    fit(name, new THREE.CapsuleGeometry(0.125, 0.38, 8, 18), pantsMaterial);
+  }
+  for (const name of ['Riding shin', 'Riding shin.001']) {
+    fit(name, new THREE.CapsuleGeometry(0.094, 0.41, 8, 18), pantsMaterial);
+  }
+  for (const name of ['Riding boot', 'Riding boot.001']) {
+    fit(name, new THREE.SphereGeometry(1, 24, 18), bootMaterial, [0.185, 0.075, 0.1]);
+  }
+
+  const scarf = riderGroup.getObjectByName('Rider scarf');
+  if (scarf instanceof THREE.Mesh) scarf.material = scarfMaterial;
+
+  if (torsoObj) {
+    const zipper = new THREE.Mesh(new THREE.CapsuleGeometry(0.008, 0.52, 4, 10), accentMaterial);
+    zipper.name = 'Jacket zipper';
+    zipper.position.set(0.272, -0.035, 0);
+
+    const belt = new THREE.Mesh(new THREE.TorusGeometry(0.207, 0.012, 8, 32), accentMaterial);
+    belt.name = 'Jacket waist piping';
+    belt.position.y = -0.29;
+    belt.rotation.x = Math.PI / 2;
+
+    const collarLeft = new THREE.Mesh(new THREE.CapsuleGeometry(0.012, 0.19, 4, 10), accentMaterial);
+    collarLeft.position.set(0.268, 0.245, 0.075);
+    collarLeft.rotation.x = 0.56;
+    const collarRight = collarLeft.clone();
+    collarRight.position.z = -0.075;
+    collarRight.rotation.x = -0.56;
+
+    for (const detail of [zipper, belt, collarLeft, collarRight]) detail.castShadow = true;
+    torsoObj.add(zipper, belt, collarLeft, collarRight);
+  }
+
+  return { torsoObj, torsoBaseScale: torsoObj?.scale.clone() ?? null };
+}
+
+function createHumanizedHead(riderGroup: THREE.Group) {
+  const skinMaterial = new THREE.MeshPhysicalMaterial({
+    color: '#a96851', roughness: 0.73, metalness: 0, clearcoat: 0.04, clearcoatRoughness: 0.9,
+  });
+  const skinHighlightMaterial = new THREE.MeshStandardMaterial({ color: '#b9775d', roughness: 0.76, metalness: 0 });
+  const hairMaterial = new THREE.MeshStandardMaterial({ color: '#201510', roughness: 0.86, metalness: 0 });
+  const browMaterial = new THREE.MeshStandardMaterial({ color: '#2b1b15', roughness: 0.9, metalness: 0 });
+  const eyeWhiteMaterial = new THREE.MeshStandardMaterial({ color: '#f4e9dc', roughness: 0.42, metalness: 0 });
+  const irisMaterial = new THREE.MeshStandardMaterial({ color: '#5b3425', roughness: 0.48, metalness: 0 });
+  const pupilMaterial = new THREE.MeshBasicMaterial({ color: '#130e0c', toneMapped: false });
+  const eyeHighlightMaterial = new THREE.MeshBasicMaterial({ color: '#fff8e8', toneMapped: false });
+  const lipMaterial = new THREE.MeshStandardMaterial({ color: '#9f4f5b', roughness: 0.62, metalness: 0 });
+  const blushMaterial = new THREE.MeshStandardMaterial({
+    color: '#c06b6d', roughness: 0.9, transparent: true, opacity: 0.2, depthWrite: false,
+  });
+  const hairBandMaterial = new THREE.MeshStandardMaterial({ color: '#c78658', roughness: 0.5, metalness: 0.08 });
+
+  const headReveal = new THREE.Group();
+  headReveal.name = 'RiderHeadReveal';
+  headReveal.position.set(0.06, 2.22, 0);
+  headReveal.visible = false;
+
+  const face = new THREE.Mesh(createOrganicFaceGeometry(), skinMaterial);
+  face.name = 'Humanized face';
+  face.scale.set(0.2, 0.25, 0.19);
+
+  const hairCrown = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 38, 26, 0, Math.PI * 2, 0, Math.PI * 0.69),
+    hairMaterial,
+  );
+  hairCrown.name = 'Soft hair crown';
+  hairCrown.position.set(-0.02, 0.055, 0);
+  hairCrown.scale.set(0.215, 0.27, 0.205);
+
+  const leftFringe = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), hairMaterial);
+  leftFringe.position.set(0.17, 0.15, 0.065);
+  leftFringe.scale.set(0.038, 0.075, 0.095);
+  leftFringe.rotation.x = 0.18;
+  const rightFringe = leftFringe.clone();
+  rightFringe.position.z = -0.065;
+  rightFringe.rotation.x = -0.18;
+
+  const earGeometry = new THREE.SphereGeometry(1, 20, 14);
+  for (const side of [-1, 1]) {
+    const ear = new THREE.Mesh(earGeometry, skinMaterial);
+    ear.position.set(-0.005, 0, side * 0.19);
+    ear.scale.set(0.035, 0.055, 0.027);
+    headReveal.add(ear);
+  }
+
+  const eyeGeometry = new THREE.SphereGeometry(1, 24, 16);
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(eyeGeometry, eyeWhiteMaterial);
+    eye.position.set(0.182, 0.052, side * 0.073);
+    eye.scale.set(0.014, 0.027, 0.049);
+
+    const iris = new THREE.Mesh(eyeGeometry, irisMaterial);
+    iris.position.set(0.195, 0.052, side * 0.073);
+    iris.scale.set(0.007, 0.014, 0.02);
+
+    const pupil = new THREE.Mesh(eyeGeometry, pupilMaterial);
+    pupil.position.set(0.201, 0.052, side * 0.073);
+    pupil.scale.set(0.004, 0.0075, 0.009);
+
+    const highlight = new THREE.Mesh(eyeGeometry, eyeHighlightMaterial);
+    highlight.position.set(0.205, 0.059, side * 0.068);
+    highlight.scale.setScalar(0.0035);
+
+    const brow = new THREE.Mesh(
+      makeStrand([
+        [0.187, 0.112, side * 0.118],
+        [0.19, 0.126, side * 0.075],
+        [0.187, 0.116, side * 0.031],
+      ], 0.006, 12),
+      browMaterial,
+    );
+    const lashes = new THREE.Mesh(
+      makeStrand([
+        [0.199, 0.074, side * 0.118],
+        [0.201, 0.083, side * 0.075],
+        [0.199, 0.077, side * 0.03],
+      ], 0.0032, 10),
+      browMaterial,
+    );
+
+    headReveal.add(eye, iris, pupil, highlight, brow, lashes);
+  }
+
+  const noseBridge = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 18), skinHighlightMaterial);
+  noseBridge.position.set(0.184, 0.006, 0);
+  noseBridge.scale.set(0.024, 0.07, 0.025);
+  const noseTip = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 18), skinHighlightMaterial);
+  noseTip.position.set(0.202, -0.021, 0);
+  noseTip.scale.set(0.029, 0.023, 0.031);
+
+  const upperLip = new THREE.Mesh(
+    makeStrand([
+      [0.196, -0.083, -0.056],
+      [0.199, -0.076, -0.02],
+      [0.201, -0.083, 0],
+      [0.199, -0.076, 0.02],
+      [0.196, -0.083, 0.056],
+    ], 0.0055, 18),
+    lipMaterial,
+  );
+  const lowerLip = new THREE.Mesh(
+    makeStrand([
+      [0.195, -0.088, -0.052],
+      [0.199, -0.102, 0],
+      [0.195, -0.088, 0.052],
+    ], 0.005, 14),
+    lipMaterial,
+  );
+
+  for (const side of [-1, 1]) {
+    const blush = new THREE.Mesh(new THREE.SphereGeometry(1, 18, 12), blushMaterial);
+    blush.position.set(0.184, -0.024, side * 0.112);
+    blush.scale.set(0.008, 0.034, 0.045);
+
+    const sideLock = new THREE.Mesh(
+      makeStrand([
+        [0.13, 0.145, side * 0.145],
+        [0.145, 0.045, side * 0.18],
+        [0.105, -0.095, side * 0.185],
+        [0.025, -0.205, side * 0.16],
+      ], 0.016, 20),
+      hairMaterial,
+    );
+    headReveal.add(blush, sideLock);
+  }
+
+  for (const mesh of [face, hairCrown, leftFringe, rightFringe, noseBridge, noseTip, upperLip, lowerLip]) {
+    mesh.castShadow = true;
+  }
+  headReveal.add(face, hairCrown, leftFringe, rightFringe, noseBridge, noseTip, upperLip, lowerLip);
+
+  const ponytailRef = new THREE.Group();
+  ponytailRef.name = 'PonytailGroup';
+  ponytailRef.position.set(-0.135, 2.245, 0);
+  const ponytailBase = ponytailRef.position.clone();
+
+  const napeHair = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 20), hairMaterial);
+  napeHair.position.set(0, -0.055, 0);
+  napeHair.scale.set(0.11, 0.13, 0.17);
+
+  const hairBand = new THREE.Mesh(new THREE.TorusGeometry(0.052, 0.014, 8, 20), hairBandMaterial);
+  hairBand.position.set(-0.045, -0.075, 0);
+  hairBand.rotation.y = Math.PI / 2;
+
+  const ponytail = new THREE.Mesh(
+    makeStrand([
+      [-0.045, -0.075, 0],
+      [-0.12, -0.12, 0.025],
+      [-0.2, -0.2, -0.025],
+      [-0.3, -0.3, 0.045],
+      [-0.39, -0.43, 0],
+    ], 0.054, 30),
+    hairMaterial,
+  );
+  const curlLeft = new THREE.Mesh(
+    makeStrand([
+      [-0.035, -0.07, 0.04],
+      [-0.12, -0.15, 0.085],
+      [-0.23, -0.25, 0.035],
+      [-0.34, -0.38, 0.075],
+    ], 0.024, 24),
+    hairMaterial,
+  );
+  const curlRight = new THREE.Mesh(
+    makeStrand([
+      [-0.035, -0.07, -0.04],
+      [-0.11, -0.16, -0.08],
+      [-0.22, -0.27, -0.03],
+      [-0.33, -0.4, -0.07],
+    ], 0.022, 24),
+    hairMaterial,
+  );
+  for (const mesh of [napeHair, hairBand, ponytail, curlLeft, curlRight]) mesh.castShadow = true;
+  ponytailRef.add(napeHair, hairBand, ponytail, curlLeft, curlRight);
+
+  riderGroup.add(headReveal, ponytailRef);
+  return { headReveal, ponytailRef, ponytailBase };
+}
 
 const MODEL_PATH = `${process.env.NEXT_PUBLIC_BASE_PATH || ''}/models/apoorva-cafe-rider.glb`;
 
-function RideRig({ controller, drive }: { controller: RideController; drive: DriveRef }) {
+type ExhaustParticle = {
+  position: THREE.Vector3;
+  velocity: THREE.Vector3;
+  age: number;
+  lifetime: number;
+  size: number;
+  spin: number;
+};
+
+function ExhaustSmoke({
+  anchors,
+  drive,
+  mode,
+  lowQuality,
+}: {
+  anchors: Array<{ current: THREE.Object3D | null }>;
+  drive: DriveRef;
+  mode: RideState;
+  lowQuality: boolean;
+}) {
+  const particleCount = lowQuality ? 12 : 26;
+  const smoke = useRef<THREE.InstancedMesh>(null);
+  const emitterCursor = useRef(0);
+  const emissionCarry = useRef(0);
+  const intensity = useRef(0);
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+  const outletQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const particles = useMemo<ExhaustParticle[]>(() => Array.from({ length: particleCount }, (_, index) => ({
+    position: new THREE.Vector3(),
+    velocity: new THREE.Vector3(),
+    age: 999,
+    lifetime: 0.7,
+    size: 0.06,
+    spin: index * 0.73,
+  })), [particleCount]);
+
+  useFrame((_, rawDelta) => {
+    const delta = Math.min(rawDelta, 0.05);
+    const runtime = drive.current;
+    const engineOn = mode === 'countdown'
+      || mode === 'riding'
+      || mode === 'target'
+      || mode === 'aiming'
+      || mode === 'shot'
+      || mode === 'reading'
+      || mode === 'summit';
+    const throttleLoad = THREE.MathUtils.clamp(
+      0.22 + runtime.velocity * 0.62 + Math.max(0, runtime.acceleration) * 0.24,
+      0,
+      1,
+    );
+    intensity.current = THREE.MathUtils.damp(intensity.current, engineOn ? throttleLoad : 0, 4.5, delta);
+    const emissionRate = (lowQuality ? 6 : 11) * intensity.current;
+    emissionCarry.current = Math.min(4, emissionCarry.current + emissionRate * delta);
+
+    let emittedThisFrame = 0;
+    while (emissionCarry.current >= 1 && emittedThisFrame < 4) {
+      const sequence = emitterCursor.current;
+      const anchor = anchors[sequence % anchors.length]?.current;
+      if (!anchor) break;
+
+      const particle = particles[sequence % particleCount];
+      const jitter = ((sequence * 37) % 101) / 100;
+      anchor.getWorldPosition(particle.position);
+      anchor.getWorldQuaternion(outletQuaternion);
+      particle.velocity
+        .set(
+          -0.42 - runtime.velocity * 1.75,
+          0.13 + jitter * 0.16,
+          (jitter - 0.5) * 0.14,
+        )
+        .applyQuaternion(outletQuaternion);
+      particle.velocity.y += 0.16;
+      particle.age = 0;
+      particle.lifetime = 0.68 + jitter * 0.48;
+      particle.size = 0.052 + jitter * 0.042;
+      particle.spin = sequence * 0.61;
+
+      emitterCursor.current += 1;
+      emissionCarry.current -= 1;
+      emittedThisFrame += 1;
+    }
+
+    particles.forEach((particle, index) => {
+      particle.age += delta;
+      const lifeProgress = particle.age / particle.lifetime;
+      if (lifeProgress >= 1) {
+        dummy.scale.setScalar(0);
+      } else {
+        particle.velocity.multiplyScalar(Math.exp(-0.42 * delta));
+        particle.velocity.y += 0.11 * delta;
+        particle.position.addScaledVector(particle.velocity, delta);
+        const fade = 1 - THREE.MathUtils.smoothstep(lifeProgress, 0.58, 1);
+        const scale = particle.size * (0.55 + lifeProgress * 2.35) * Math.sqrt(Math.max(0, fade));
+        dummy.position.copy(particle.position);
+        dummy.rotation.set(
+          particle.spin + lifeProgress * 0.8,
+          particle.spin * 0.7 + lifeProgress,
+          particle.spin * 0.35,
+        );
+        dummy.scale.set(scale * 1.35, scale, scale * 1.15);
+      }
+      dummy.updateMatrix();
+      smoke.current?.setMatrixAt(index, dummy.matrix);
+    });
+
+    if (smoke.current) smoke.current.instanceMatrix.needsUpdate = true;
+  });
+
+  return <instancedMesh ref={smoke} args={[undefined, undefined, particleCount]} frustumCulled={false} renderOrder={3}>
+    <icosahedronGeometry args={[1, 1]} />
+    <meshBasicMaterial
+      color="#c9d1d0"
+      transparent
+      opacity={0.17}
+      depthWrite={false}
+      blending={THREE.NormalBlending}
+    />
+  </instancedMesh>;
+}
+
+function RideRig({
+  controller,
+  drive,
+  lowQuality,
+}: {
+  controller: RideController;
+  drive: DriveRef;
+  lowQuality: boolean;
+}) {
   const { scene } = useGLTF(MODEL_PATH);
   const { camera } = useThree();
   const bikeRoot = useRef<THREE.Group>(null);
   const visual = useRef<THREE.Group>(null);
+  const leftExhaustAnchor = useRef<THREE.Group>(null);
+  const rightExhaustAnchor = useRef<THREE.Group>(null);
   const kickstand = useRef<THREE.Group>(null);
   const tracerImpact = useRef<THREE.Mesh>(null);
   const point = useMemo(() => new THREE.Vector3(), []);
@@ -1215,17 +2107,9 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
   const summitPoint = useMemo(() => roadCurve.getPointAt(SUMMIT_PROGRESS), []);
   const summitTangent = useMemo(() => roadCurve.getTangentAt(SUMMIT_PROGRESS).normalize(), []);
   const summitSide = useMemo(() => new THREE.Vector3(-summitTangent.z, 0, summitTangent.x).normalize(), [summitTangent]);
-  const sunPosition = useMemo(() => new THREE.Vector3(-24, 54, 585), []);
-  const sunDirection = useMemo(() => sunPosition.clone().sub(summitPoint).normalize(), [summitPoint, sunPosition]);
-  const finalRiderYaw = useMemo(() => {
-    const localForward = sunDirection.dot(summitTangent);
-    const localSide = sunDirection.dot(summitSide);
-    return Math.atan2(-localSide, localForward);
-  }, [summitSide, summitTangent, sunDirection]);
+  const sunPosition = useMemo(() => new THREE.Vector3(...SUN_POSITION), []);
   const finaleStartedAt = useRef(-1);
   const previousRideMode = useRef<RideState>('intro');
-  const riderTarget = useMemo(() => new THREE.Vector3(), []);
-  const identityQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const aimWeight = useRef(0);
   const shotFiredAt = useRef(-1);
   const lastShotStage = useRef(-1);
@@ -1234,17 +2118,20 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
 
   const {
     model,
+    steeringGroup,
     floorOffset,
     riderGroup,
     helmetGroup,
     helmetBase,
     headReveal,
     ponytailRef,
+    ponytailBase,
     scarfObj,
     gunGroup,
     muzzleTip,
     muzzleFlash,
     torsoObj,
+    torsoBaseScale,
     riderOriginals,
   } = useMemo(() => {
     const clone = scene.clone(true);
@@ -1269,13 +2156,33 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       }
     }
 
-    const riderNames = [
-      'Rider hips', 'Rider torso jacket', 'Shoulder left', 'Shoulder right', 'Rider neck',
-      'Jacket arm', 'Gloved forearm', 'Glove', 'Jacket arm.001', 'Gloved forearm.001', 'Glove.001',
-      'Riding thigh', 'Riding shin', 'Riding boot', 'Riding thigh.001', 'Riding shin.001', 'Riding boot.001',
-      'Rider scarf',
+    const steeringGroup = new THREE.Group();
+    steeringGroup.name = 'FrontSteering';
+    steeringGroup.position.set(1.08, 1.28, 0);
+    clone.add(steeringGroup);
+    clone.updateMatrixWorld(true);
+    const steeringPartNames = [
+      'FrontWheelSpin',
+      'Front wheel brake caliper',
+      'Front fork',
+      'Front fork.001',
+      'Fork brace',
+      'Fork brace.001',
+      'Handle bar',
+      'Left clip-on',
+      'Right clip-on',
+      'Headlight shell',
+      'Headlight lens',
+      'Headlight bracket',
+      'Headlight bracket.001',
+      'Turn indicator',
+      'Turn indicator.001',
     ];
-    const helmetNames = ['Rider helmet', 'Helmet crown', 'Helmet visor', 'Helmet rear'];
+    for (const name of steeringPartNames) {
+      const object = clone.getObjectByName(name);
+      if (object) steeringGroup.attach(object);
+    }
+
     const riderGroup = new THREE.Group();
     riderGroup.name = 'RiderDismount';
     const helmetGroup = new THREE.Group();
@@ -1285,18 +2192,20 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     clone.add(riderGroup);
     clone.updateMatrixWorld(true);
 
-    for (const name of riderNames) {
-      const object = clone.getObjectByName(name);
+    for (const name of RIDER_PART_NAMES) {
+      const object = resolveModelPart(clone, name);
       if (object) riderGroup.attach(object);
     }
     riderGroup.add(helmetGroup);
     clone.updateMatrixWorld(true);
-    for (const name of helmetNames) {
-      const object = clone.getObjectByName(name);
+    for (const name of HELMET_PART_NAMES) {
+      const object = resolveModelPart(clone, name);
       if (object) helmetGroup.attach(object);
     }
 
-    const riderParts = riderNames
+    const { torsoObj, torsoBaseScale } = softenRiderMeshes(riderGroup);
+
+    const riderParts = RIDER_PART_NAMES
       .map((name) => riderGroup.getObjectByName(name))
       .filter((object): object is THREE.Object3D => !!object);
     const riderOriginals = riderParts.map((object) => ({
@@ -1306,7 +2215,6 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     }));
 
     const scarfObj = riderGroup.getObjectByName('Rider scarf');
-    const torsoObj = riderGroup.getObjectByName('Rider torso jacket');
 
     // Attach prominent, stylish sci-fi pistol to right glove
     const rightGlove = riderGroup.getObjectByName('Glove.001');
@@ -1369,76 +2277,25 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     gunGroup.add(gunBody, gunSlide, energyCore, barrel, laserDiode, muzzleTip, muzzleFlash, grip);
     if (rightGlove) rightGlove.add(gunGroup);
 
-    const headReveal = new THREE.Group();
-    headReveal.name = 'RiderHeadReveal';
-    headReveal.position.set(0.06, 2.22, 0);
-    headReveal.visible = false;
-
-    // Face / head base
-    const face = new THREE.Mesh(
-      new THREE.SphereGeometry(0.22, 24, 18),
-      new THREE.MeshStandardMaterial({ color: '#9b624c', roughness: 0.78 }),
-    );
-    face.scale.set(1.04, 1.16, 0.96);
-
-    // Styled hair crown
-    const hair = new THREE.Mesh(
-      new THREE.SphereGeometry(0.238, 22, 18, 0, Math.PI * 2, 0, Math.PI * 0.64),
-      new THREE.MeshStandardMaterial({ color: '#1a1410', roughness: 0.88 }),
-    );
-    hair.position.set(-0.03, 0.09, 0);
-
-    // Front bangs / fringe
-    const bangs = new THREE.Mesh(
-      new THREE.SphereGeometry(0.18, 16, 12, 0, Math.PI, 0, Math.PI * 0.45),
-      new THREE.MeshStandardMaterial({ color: '#1a1410', roughness: 0.88 }),
-    );
-    bangs.position.set(0.13, 0.12, 0);
-    bangs.rotation.set(0, Math.PI / 2, -0.3);
-
-    // Cool dark sunglasses
-    const shades = new THREE.Mesh(
-      new THREE.BoxGeometry(0.11, 0.065, 0.28),
-      new THREE.MeshStandardMaterial({ color: '#111518', roughness: 0.25, metalness: 0.8 }),
-    );
-    shades.position.set(0.18, 0.035, 0);
-
-    // Ponytail with hair band
-    const ponytailRef = new THREE.Group();
-    ponytailRef.name = 'PonytailGroup';
-    ponytailRef.position.set(-0.21, 0.02, 0);
-
-    const hairBand = new THREE.Mesh(
-      new THREE.TorusGeometry(0.045, 0.018, 8, 16),
-      new THREE.MeshStandardMaterial({ color: '#d28236', roughness: 0.45 }),
-    );
-    hairBand.rotation.y = Math.PI / 2;
-
-    const ponytail = new THREE.Mesh(
-      new THREE.ConeGeometry(0.09, 0.42, 12),
-      new THREE.MeshStandardMaterial({ color: '#1a1410', roughness: 0.9 }),
-    );
-    ponytail.position.set(-0.12, -0.16, 0);
-    ponytail.rotation.z = 0.55;
-
-    ponytailRef.add(hairBand, ponytail);
-    headReveal.add(face, hair, bangs, shades, ponytailRef);
-    riderGroup.add(headReveal);
+    const { headReveal, ponytailRef, ponytailBase } = createHumanizedHead(riderGroup);
 
     clone.updateMatrixWorld(true);
     const bounds = new THREE.Box3().setFromObject(clone);
     return {
       model: clone,
+      steeringGroup,
       riderGroup,
       helmetGroup,
       helmetBase,
       headReveal,
       ponytailRef,
+      ponytailBase,
       scarfObj,
       gunGroup,
       muzzleTip,
       muzzleFlash,
       torsoObj,
+      torsoBaseScale,
       riderOriginals,
       floorOffset: 0.08 - bounds.min.y * BIKE_SCALE,
     };
@@ -1469,18 +2326,9 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     if (terminalScene && finaleStartedAt.current < 0) finaleStartedAt.current = clock.elapsedTime;
     const finaleElapsed = terminalScene ? Math.max(0, clock.elapsedTime - finaleStartedAt.current) : 0;
 
-    // Timeline phases:
-    // 0.2s - 2.0s: Puts bike on kickstand & bike settles with realistic lean
-    // 2.0s - 4.8s: Dismounts from bike (swings right leg over, stands on ground)
-    // 4.8s - 7.6s: Takes helmet off (arms reach up, lifts helmet, reveals face/hair, carries helmet to hip)
-    // 7.6s - 11.5s: Walks to the end of the road / scenic overlook edge
-    // 11.5s+: Stands at the edge of the road staring directly at the sun
-    const parkingStand = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 0.2, 1.8) : 0;
-    const dismountProgress = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 2.0, 4.8) : 0;
-    const armLiftProgress = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 4.8, 5.9) : 0;
-    const helmetLift = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 5.6, 6.7) : 0;
-    const helmetCarry = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 6.4, 7.6) : 0;
-    const walkProgress = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 7.8, 11.6) : 0;
+    // Finale: settle the motorcycle onto its kickstand, then reveal and hold the summit view.
+    const parkingStand = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 0.15, 1.1) : 0;
+    const viewReveal = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 1.15, 3.6) : 0;
 
     // Gun aiming & shooting weights
     const isAimingMode = (controller.mode === 'target' || controller.mode === 'aiming' || controller.mode === 'shot') && !terminalScene;
@@ -1494,92 +2342,17 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     if (terminalScene) {
       // In finale, gun is holstered
       if (gunGroup) gunGroup.visible = false;
+      riderGroup.position.set(0, 0, 0);
+      riderGroup.rotation.set(0, 0, 0);
+      helmetGroup.position.copy(helmetBase);
+      helmetGroup.rotation.set(0, 0, 0);
+      headReveal.visible = false;
+      headReveal.scale.setScalar(0);
+      headReveal.rotation.set(0, 0, 0);
 
-      const sideX = -0.32 * dismountProgress;
-      const sideZ = 1.38 * dismountProgress;
-      const walkWeight = Math.sin(Math.PI * walkProgress);
-      const walkStride = Math.sin(finaleElapsed * 6.8) * walkWeight;
-
-      // Rider root position & rotation: steps down from the saddle to the road pavement
-      const riderTargetX = THREE.MathUtils.lerp(sideX, 4.6, walkProgress);
-      const riderTargetZ = THREE.MathUtils.lerp(sideZ, 0.65, walkProgress);
-      const riderTargetY = -0.14 * dismountProgress + Math.abs(walkStride) * 0.035;
-
-      riderGroup.position.set(riderTargetX, riderTargetY, riderTargetZ);
-      riderGroup.rotation.x = -0.065 * parkingStand * dismountProgress;
-      riderGroup.rotation.y = THREE.MathUtils.lerp(-0.04 * dismountProgress, finalRiderYaw, walkProgress);
-
-      // Rider body parts articulation
       for (const snapshot of riderOriginals) {
-        const target = STANDING_RIDER_POSITIONS[snapshot.object.name];
-        if (target) {
-          riderTarget.set(target[0], target[1], target[2]);
-          snapshot.object.position.lerpVectors(snapshot.position, riderTarget, dismountProgress);
-
-          // Right leg swing over the cafe seat during dismount
-          if (snapshot.object.name.startsWith('Riding') && snapshot.object.name.endsWith('.001')) {
-            const stepArc = Math.sin(dismountProgress * Math.PI);
-            snapshot.object.position.y += stepArc * 0.28;
-            snapshot.object.position.z -= stepArc * 0.32;
-          }
-
-          // Natural walking leg stride
-          if (walkProgress > 0 && walkProgress < 1 && snapshot.object.name.startsWith('Riding')) {
-            const legPhase = snapshot.object.name.endsWith('.001') ? -walkStride : walkStride;
-            snapshot.object.position.x += legPhase * 0.12;
-            snapshot.object.position.y += Math.max(0, -legPhase) * 0.04;
-          }
-
-          // Arm animation: Raising to helmet, lifting, and carrying down to hip
-          const isLeftArm = snapshot.object.name === 'Jacket arm' || snapshot.object.name === 'Gloved forearm' || snapshot.object.name === 'Glove';
-          const isRightArm = snapshot.object.name === 'Jacket arm.001' || snapshot.object.name === 'Gloved forearm.001' || snapshot.object.name === 'Glove.001';
-
-          if (dismountProgress >= 0.95) {
-            if (isLeftArm) {
-              const liftY = 0.58 * armLiftProgress - 0.42 * helmetCarry;
-              const liftX = 0.32 * armLiftProgress - 0.24 * helmetCarry;
-              const liftZ = 0.08 * armLiftProgress + 0.18 * helmetCarry;
-              snapshot.object.position.y += liftY;
-              snapshot.object.position.x += liftX;
-              snapshot.object.position.z += liftZ;
-            } else if (isRightArm) {
-              const liftY = 0.58 * armLiftProgress - 0.58 * helmetCarry;
-              const liftX = 0.32 * armLiftProgress - 0.32 * helmetCarry;
-              snapshot.object.position.y += liftY;
-              snapshot.object.position.x += liftX;
-              if (walkProgress > 0 && walkProgress < 1) {
-                snapshot.object.position.x += walkStride * 0.12;
-              }
-            }
-          }
-        }
-
-        if (STRAIGHTEN_RIDER_PARTS.has(snapshot.object.name)) {
-          snapshot.object.quaternion.slerpQuaternions(snapshot.quaternion, identityQuaternion, dismountProgress);
-        }
-      }
-
-      // Helmet removal animation (lifts up from head, moves down to rest beside left hip)
-      helmetGroup.position.set(
-        helmetBase.x - 0.26 * helmetCarry,
-        helmetBase.y + 0.42 * helmetLift - 1.34 * helmetCarry,
-        helmetBase.z + 0.44 * helmetCarry,
-      );
-      helmetGroup.rotation.x = 0.54 * helmetCarry;
-      helmetGroup.rotation.z = -0.2 * helmetCarry;
-
-      // Reveal head/face and hair once helmet begins lifting
-      headReveal.visible = finaleElapsed > 5.5;
-      const headScale = THREE.MathUtils.smootherstep(finaleElapsed, 5.5, 6.1);
-      headReveal.scale.setScalar(headScale);
-
-      // Ponytail & scarf gentle wind sway
-      if (ponytailRef) {
-        ponytailRef.rotation.z = 0.12 + Math.sin(clock.elapsedTime * 3.6) * 0.09;
-        ponytailRef.rotation.y = Math.sin(clock.elapsedTime * 2.4) * 0.06;
-      }
-      if (scarfObj) {
-        scarfObj.rotation.x = Math.sin(clock.elapsedTime * 4.2) * 0.06;
+        snapshot.object.position.copy(snapshot.position);
+        snapshot.object.quaternion.copy(snapshot.quaternion);
       }
     } else {
       // Normal driving / aiming posture
@@ -1588,6 +2361,8 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       helmetGroup.position.copy(helmetBase);
       helmetGroup.rotation.set(0, 0, 0);
       headReveal.visible = false;
+      headReveal.scale.setScalar(0);
+      headReveal.rotation.set(0, 0, 0);
 
       const currentAim = aimWeight.current;
       if (gunGroup) gunGroup.visible = currentAim > 0.02;
@@ -1633,6 +2408,39 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       }
     }
 
+    // Soft, continuous secondary motion keeps the rider from reading as a rigid mannequin.
+    const breath = Math.sin(clock.elapsedTime * 1.65) * 0.007;
+    if (torsoObj && torsoBaseScale) {
+      torsoObj.scale.set(
+        torsoBaseScale.x * (1 + breath * 0.24),
+        torsoBaseScale.y * (1 + breath),
+        torsoBaseScale.z * (1 + breath * 0.36),
+      );
+    }
+
+    const motionVelocity = THREE.MathUtils.clamp(runtime.velocity / 0.72, 0, 1);
+    if (!terminalScene) {
+      const naturalHeadWeight = 1 - aimWeight.current;
+      helmetGroup.position.y += Math.sin(clock.elapsedTime * 2.1) * 0.004 * naturalHeadWeight;
+      helmetGroup.rotation.y += Math.sin(clock.elapsedTime * 0.62) * 0.026 * naturalHeadWeight;
+      helmetGroup.rotation.z += (
+        Math.sin(clock.elapsedTime * 1.45) * 0.012 - runtime.steer * 0.035
+      ) * naturalHeadWeight;
+    }
+
+    ponytailRef.position.copy(ponytailBase);
+    ponytailRef.position.y += Math.sin(clock.elapsedTime * 3.2) * (terminalScene ? 0.006 : 0.01);
+    ponytailRef.rotation.z = (terminalScene ? 0.08 : 0.13)
+      + Math.sin(clock.elapsedTime * (terminalScene ? 2.8 : 4.2)) * (0.045 + motionVelocity * 0.07);
+    ponytailRef.rotation.y = Math.sin(clock.elapsedTime * 2.35) * (0.035 + motionVelocity * 0.04);
+    ponytailRef.rotation.x = Math.cos(clock.elapsedTime * 2.75) * 0.018;
+
+    if (scarfObj) {
+      const scarfFlutter = Math.sin(clock.elapsedTime * (4.1 + motionVelocity * 2.2))
+        * (terminalScene ? 0.05 : 0.025 + motionVelocity * 0.045);
+      scarfObj.rotation.x += scarfFlutter;
+    }
+
     if (runtime.resetApplied !== controller.rideReset) {
       runtime.progress = RIDE_START_PROGRESS;
       runtime.velocity = 0;
@@ -1640,6 +2448,9 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       runtime.lane = 0;
       runtime.steer = 0;
       runtime.wheelAngle = 0;
+      runtime.touchSteer = 0;
+      runtime.touchThrottle = false;
+      runtime.touchBrake = false;
       runtime.gestureThrottle = 0;
       runtime.targetHit = false;
       runtime.telemetryElapsed = 0;
@@ -1661,6 +2472,9 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       runtime.acceleration = 0;
       runtime.lane = 0;
       runtime.steer = 0;
+      runtime.touchSteer = 0;
+      runtime.touchThrottle = false;
+      runtime.touchBrake = false;
       runtime.targetHit = false;
       runtime.hasLastPosition = false;
       runtime.stageApplied = controller.activeIndex;
@@ -1687,12 +2501,13 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
 
     const keyboardSteer = controlMode ? (runtime.right ? 1 : 0) - (runtime.left ? 1 : 0) : 0;
     const pointerSteer = controller.mode === 'riding' || controller.mode === 'summit' ? runtime.pointerX * 0.72 : 0;
-    const desiredSteer = THREE.MathUtils.clamp(keyboardSteer + pointerSteer, -1, 1);
+    const touchSteer = controlMode ? runtime.touchSteer : 0;
+    const desiredSteer = THREE.MathUtils.clamp(keyboardSteer + pointerSteer + touchSteer, -1, 1);
     runtime.steer = THREE.MathUtils.damp(runtime.steer, desiredSteer, 9.5, delta);
 
     runtime.gestureThrottle = THREE.MathUtils.damp(runtime.gestureThrottle, 0, 2.8, delta);
-    const heldThrottle = controlMode && (runtime.forward || runtime.mouseThrottle) ? 1 : 0;
-    const braking = controlMode && (runtime.brake || runtime.gestureThrottle < -0.08);
+    const heldThrottle = controlMode && (runtime.forward || runtime.mouseThrottle || runtime.touchThrottle) ? 1 : 0;
+    const braking = controlMode && (runtime.brake || runtime.touchBrake || runtime.gestureThrottle < -0.08);
     const throttle = Math.max(heldThrottle, controlMode ? Math.max(0, runtime.gestureThrottle) : 0);
     let desiredVelocity = movingMode ? CRUISE_SPEED + (1 - CRUISE_SPEED) * throttle : 0;
 
@@ -1703,9 +2518,11 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     const summitRemaining = SUMMIT_DISTANCE - currentDistance;
     let terminalBraking = false;
     if (controller.mode === 'summit') {
-      desiredVelocity = Math.max(0.52, CRUISE_SPEED + (1 - CRUISE_SPEED) * throttle);
-      if (summitRemaining < 36) {
-        const summitLimit = THREE.MathUtils.lerp(0.04, 0.52, THREE.MathUtils.clamp(summitRemaining / 36, 0, 1));
+      const allTargetsHit = controller.completedCount === PORTFOLIO_STOPS.length;
+      const maxVelocity = allTargetsHit ? 1.43 : 1;
+      desiredVelocity = Math.max(0.52, Math.min(CRUISE_SPEED + (maxVelocity - CRUISE_SPEED) * throttle, maxVelocity));
+      if (summitRemaining < 18) {
+        const summitLimit = THREE.MathUtils.lerp(0.12, 0.58, THREE.MathUtils.clamp(summitRemaining / 18, 0, 1));
         desiredVelocity = Math.min(desiredVelocity, summitLimit);
       }
       if (summitRemaining <= 0.8) {
@@ -1717,14 +2534,16 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
 
     const previousVelocity = runtime.velocity;
     const velocityDelta = desiredVelocity - runtime.velocity;
-    const accelerationRate = THREE.MathUtils.lerp(0.78, 0.42, runtime.velocity);
+    const accelerationRate = THREE.MathUtils.lerp(0.78, 0.42, Math.min(runtime.velocity, 1));
     const decelerationRate = braking || terminalBraking
-      ? 1.65
+      ? 2.2
       : controller.mode === 'aiming'
         ? 1.25
-        : controller.mode === 'target' || controller.mode === 'summit'
-          ? 0.62
-          : 0.34;
+        : controller.mode === 'summit'
+          ? 1.25
+          : controller.mode === 'target'
+            ? 0.62
+            : 0.34;
     const velocityRate = velocityDelta >= 0 ? accelerationRate : decelerationRate;
     runtime.velocity += THREE.MathUtils.clamp(velocityDelta, -velocityRate * delta, velocityRate * delta);
     const accelerationSample = (runtime.velocity - previousVelocity) / Math.max(delta, 0.001);
@@ -1736,10 +2555,12 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     );
 
     const timeScale = movingMode ? controller.speed : 0;
+    let laneVelocity = 0;
     if (movingMode) {
-      const lateralSpeed = THREE.MathUtils.lerp(2.2, 4.2, runtime.velocity);
+      const lateralSpeed = Math.min(runtime.velocity, 1) * THREE.MathUtils.lerp(2.2, 4.2, Math.min(runtime.velocity, 1));
+      laneVelocity = runtime.steer * lateralSpeed * timeScale;
       runtime.lane = THREE.MathUtils.clamp(
-        runtime.lane + runtime.steer * lateralSpeed * delta * timeScale,
+        runtime.lane + laneVelocity * delta,
         -MAX_LANE_OFFSET,
         MAX_LANE_OFFSET,
       );
@@ -1788,17 +2609,19 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       controller.reportVehicleSpeed(runtime.velocity * timeScale);
     }
 
-    roadCurve.getPointAt(runtime.progress, point);
-    roadCurve.getTangentAt(runtime.progress, tangent).normalize();
+    // Direct menu playback uses the same summit staging as a naturally completed ride.
+    const renderProgress = terminalScene ? SUMMIT_PROGRESS : runtime.progress;
+    roadCurve.getPointAt(renderProgress, point);
+    roadCurve.getTangentAt(renderProgress, tangent).normalize();
     side.set(-tangent.z, 0, tangent.x).normalize();
-    point.addScaledVector(side, runtime.lane);
+    point.addScaledVector(side, terminalScene ? 0 : runtime.lane);
 
-    const distanceTravelled = runtime.hasLastPosition ? point.distanceTo(runtime.lastPosition) : 0;
+    const distanceTravelled = !terminalScene && runtime.hasLastPosition ? point.distanceTo(runtime.lastPosition) : 0;
     runtime.lastPosition.copy(point);
     runtime.hasLastPosition = true;
     runtime.wheelAngle += distanceTravelled / WHEEL_RADIUS_WORLD;
 
-    roadCurve.getTangentAt(Math.min(runtime.progress + 0.012, 1), tangentAhead).normalize();
+    roadCurve.getTangentAt(Math.min(renderProgress + 0.012, 1), tangentAhead).normalize();
     const turnAngle = Math.atan2(
       tangent.z * tangentAhead.x - tangent.x * tangentAhead.z,
       THREE.MathUtils.clamp(tangent.dot(tangentAhead), -1, 1),
@@ -1811,7 +2634,11 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       ? 0.085 * parkingStand
       : THREE.MathUtils.clamp(curveLean + steeringLean, -0.46, 0.46);
 
-    heading.copy(tangent).addScaledVector(side, runtime.steer * 0.08).normalize();
+    heading
+      .copy(tangent)
+      .multiplyScalar(Math.max(actualSpeed, 0.25))
+      .addScaledVector(side, laneVelocity)
+      .normalize();
     frameSide.crossVectors(heading, worldUp).normalize();
     frameUp.crossVectors(frameSide, heading).normalize();
     frameMatrix.makeBasis(heading, frameUp, frameSide);
@@ -1824,10 +2651,26 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
 
     if (visual.current) {
       visual.current.rotation.x = THREE.MathUtils.damp(visual.current.rotation.x, leanTarget, 6.8, delta);
-      const pitchTarget = terminalScene ? 0 : THREE.MathUtils.clamp(runtime.acceleration * 0.032, -0.055, 0.032);
-      visual.current.rotation.z = THREE.MathUtils.damp(visual.current.rotation.z, pitchTarget, braking ? 10 : 5.5, delta);
-      visual.current.position.y = THREE.MathUtils.damp(visual.current.position.y, 0, 10, delta);
+      const pitchTarget = terminalScene ? 0 : THREE.MathUtils.clamp(runtime.acceleration * 0.052, -0.09, 0.055);
+      const roadBuzz = terminalScene
+        ? 0
+        : (
+          Math.sin(runtime.wheelAngle * 0.18)
+          + Math.sin(runtime.wheelAngle * 0.43 + 1.7) * 0.48
+        ) * runtime.velocity * 0.012;
+      const suspensionCompression = terminalScene ? 0 : -Math.abs(runtime.acceleration) * 0.006;
+      visual.current.rotation.z = THREE.MathUtils.damp(visual.current.rotation.z, pitchTarget, braking ? 11.5 : 6.2, delta);
+      visual.current.position.y = THREE.MathUtils.damp(
+        visual.current.position.y,
+        roadBuzz + suspensionCompression,
+        12.5,
+        delta,
+      );
     }
+    const steeringAngle = terminalScene
+      ? 0
+      : -runtime.steer * THREE.MathUtils.lerp(0.28, 0.12, runtime.velocity);
+    steeringGroup.rotation.y = THREE.MathUtils.damp(steeringGroup.rotation.y, steeringAngle, 11, delta);
     if (kickstand.current) {
       kickstand.current.rotation.x = THREE.MathUtils.lerp(-0.18, -0.42, parkingStand);
       kickstand.current.rotation.z = THREE.MathUtils.lerp(-1.35, 0, parkingStand);
@@ -1869,49 +2712,19 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     const focusTarget = controller.mode === 'target' || controller.mode === 'aiming' || controller.mode === 'shot';
 
     if (terminalScene) {
-      // Keyframe 1: Arrival & Kickstand Parking Shot (0.0s - 4.8s)
+      // Beat 1: close parking shot while the kickstand deploys.
       const cam1Pos = summitPoint.clone().addScaledVector(summitTangent, -4.8).addScaledVector(summitSide, 3.2);
       cam1Pos.y = summitPoint.y + 1.85;
       const cam1Look = summitPoint.clone().addScaledVector(summitTangent, 0.8);
       cam1Look.y = summitPoint.y + 1.25;
 
-      // Keyframe 2: Helmet Removal Close-up Portrait (4.8s - 7.6s)
-      const cam2Pos = summitPoint.clone().addScaledVector(summitTangent, 1.2).addScaledVector(summitSide, 2.8);
-      cam2Pos.y = summitPoint.y + 2.3;
-      const cam2Look = summitPoint.clone().addScaledVector(summitTangent, -0.2).addScaledVector(summitSide, 1.25);
-      cam2Look.y = summitPoint.y + 2.15;
-
-      // Keyframe 3: Walking Tracking (7.6s - 11.5s)
-      const currentRiderPos = summitPoint.clone()
-        .addScaledVector(summitTangent, THREE.MathUtils.lerp(-0.22, 4.8, walkProgress))
-        .addScaledVector(summitSide, THREE.MathUtils.lerp(1.25, 0.55, walkProgress));
-      currentRiderPos.y = summitPoint.y + 1.6;
-
-      const cam3Pos = summitPoint.clone()
-        .addScaledVector(summitTangent, THREE.MathUtils.lerp(-2.6, 1.8, walkProgress))
-        .addScaledVector(summitSide, 5.2);
-      cam3Pos.y = summitPoint.y + 2.6;
-      const cam3Look = currentRiderPos;
-
-      // Keyframe 4: Majestic Wide Vista at Sun (11.5s+)
+      // Beat 2: pull out to the landscape and hold there.
       const cam4Pos = summitPoint.clone().addScaledVector(summitTangent, -10.5).addScaledVector(summitSide, 8.8);
       cam4Pos.y = summitPoint.y + 6.2;
-      const cam4Look = summitPoint.clone().addScaledVector(sunDirection, 65);
-      cam4Look.y = summitPoint.y + 2.8;
+      const cam4Look = sunPosition.clone();
 
-      // Smooth blends between keyframe stages
-      const t12 = THREE.MathUtils.smootherstep(finaleElapsed, 4.2, 5.4);
-      const t23 = THREE.MathUtils.smootherstep(finaleElapsed, 7.2, 8.4);
-      const t34 = THREE.MathUtils.smootherstep(finaleElapsed, 11.0, 14.5);
-
-      const blend12Pos = new THREE.Vector3().lerpVectors(cam1Pos, cam2Pos, t12);
-      const blend12Look = new THREE.Vector3().lerpVectors(cam1Look, cam2Look, t12);
-
-      const blend23Pos = new THREE.Vector3().lerpVectors(blend12Pos, cam3Pos, t23);
-      const blend23Look = new THREE.Vector3().lerpVectors(blend12Look, cam3Look, t23);
-
-      desiredCamera.lerpVectors(blend23Pos, cam4Pos, t34);
-      desiredLook.lerpVectors(blend23Look, cam4Look, t34);
+      desiredCamera.lerpVectors(cam1Pos, cam4Pos, viewReveal);
+      desiredLook.lerpVectors(cam1Look, cam4Look, viewReveal);
     } else {
       const isAiming = controller.mode === 'aiming' || controller.mode === 'shot';
       const isTarget = controller.mode === 'target';
@@ -1949,13 +2762,17 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       }
     }
 
+    const finaleCameraEntry = terminalScene && finaleElapsed < 0.45;
     const cameraRate = terminalScene
-      ? THREE.MathUtils.lerp(2.6, 1.1, THREE.MathUtils.smootherstep(finaleElapsed, 11.0, 14.5))
+      ? finaleCameraEntry
+        ? 22
+        : THREE.MathUtils.lerp(5.0, 2.0, viewReveal)
       : (controller.mode === 'aiming' || controller.mode === 'shot')
         ? 6.8
         : 4.8;
     cameraBase.lerp(desiredCamera, 1 - Math.exp(-delta * cameraRate));
-    lookAt.lerp(desiredLook, 1 - Math.exp(-delta * (terminalScene ? 3.2 : 7.2)));
+    const lookRate = finaleCameraEntry ? 22 : terminalScene ? 5.0 : 7.2;
+    lookAt.lerp(desiredLook, 1 - Math.exp(-delta * lookRate));
     camera.position.copy(cameraBase);
     const modeShake = terminalScene ? 0 : focusTarget ? 0.08 : controller.mode === 'reading' ? 0.06 : 1;
     const shake = speed01 * speed01 * modeShake;
@@ -1986,8 +2803,26 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
 
   return <>
     <group ref={bikeRoot}>
+      <mesh
+        position={[0, -floorOffset + 0.138, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        scale={[1.75, 0.48, 1]}
+        renderOrder={1}
+      >
+        <circleGeometry args={[1, 40]} />
+        <meshBasicMaterial
+          color="#030708"
+          transparent
+          opacity={0.3}
+          depthWrite={false}
+          polygonOffset
+          polygonOffsetFactor={-3}
+        />
+      </mesh>
       <group ref={visual} scale={BIKE_SCALE}>
         <primitive object={model} />
+        <group ref={leftExhaustAnchor} position={[-1.43, 0.72, 0.29]} />
+        <group ref={rightExhaustAnchor} position={[-1.43, 0.72, -0.29]} />
         <group ref={kickstand} position={[-0.45, 0.55, 0.34]} rotation={[-0.18, 0, -1.35]}>
           <mesh position={[0, -0.38, 0]} castShadow>
             <cylinderGeometry args={[0.035, 0.045, 0.76, 8]} />
@@ -2000,6 +2835,13 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
         </group>
       </group>
     </group>
+
+    <ExhaustSmoke
+      anchors={[leftExhaustAnchor, rightExhaustAnchor]}
+      drive={drive}
+      mode={controller.mode}
+      lowQuality={lowQuality}
+    />
 
     {/* Instant Target Hit Flash on Billboard Core */}
     <mesh ref={tracerImpact} visible={false}>
@@ -2274,7 +3116,7 @@ function Scene({ controller, drive, lowQuality }: { controller: RideController; 
     <Sky distance={450000} sunPosition={isFinale ? [-28, 12, 140] : [-20, 22, 120]} inclination={isFinale ? 0.58 : 0.46} azimuth={0.18} turbidity={isFinale ? 7.4 : 5.2} rayleigh={isFinale ? 2.1 : 1.2} mieCoefficient={0.008} mieDirectionalG={0.84} />
     <Atmosphere />
     <Terrain />
-    <Road />
+    <Road lowQuality={lowQuality} />
     <TreeField count={lowQuality ? 58 : 126} />
     <SummitVista />
     <Sparkles
@@ -2297,7 +3139,7 @@ function Scene({ controller, drive, lowQuality }: { controller: RideController; 
       color="#ffd67d"
       noise={1.8}
     />}
-    <RideRig controller={controller} drive={drive} />
+    <RideRig controller={controller} drive={drive} lowQuality={lowQuality} />
     {PORTFOLIO_STOPS.map((portfolioStop, index) => {
       const status: TargetStatus = controller.completedStops.includes(index)
         ? 'completed'
@@ -2330,7 +3172,7 @@ function SectionPanel({ controller }: { controller: RideController }) {
   const portfolioStop = controller.panelStop;
   if (!portfolioStop) return null;
   const actionLabel = controller.previewing
-    ? 'RETURN TO RIDE'
+    ? controller.previewReturnMode === 'finale' ? 'CLOSE DETAILS' : 'RETURN TO RIDE'
     : portfolioStop.id === 'contact'
       ? 'RIDE TO SUMMIT'
       : 'CONTINUE RIDE';
@@ -2346,13 +3188,19 @@ function SectionPanel({ controller }: { controller: RideController }) {
     <div className="skills-heading">
       <p>{portfolioStop.number} / {controller.previewing ? 'DIRECT ACCESS' : portfolioStop.eyebrow}</p>
       <h2 id={'section-' + portfolioStop.id}>{portfolioStop.heading[0]}<br /><em>{portfolioStop.heading[1]}</em></h2>
-      <span>{controller.previewing ? 'Quick view - route progress is unchanged' : 'World speed reduced to 20%'}</span>
+      <span>{controller.previewing ? 'Quick view - route progress is unchanged' : 'GOING THROUGH THE RIDE'}</span>
       <p className="section-note">{portfolioStop.note}</p>
     </div>
-    <div className="skills-columns">
+    <div className={'skills-columns group-count-' + portfolioStop.groups.length}>
       {portfolioStop.groups.map((group) => <article key={group.label}>
         <b>{group.label}</b>
         <p>{group.lines.map((line, index) => <span key={line}>{line}{index < group.lines.length - 1 && <br />}</span>)}</p>
+        {group.links && <div className="skills-links">
+          {group.links.map((link) => {
+            const opensNewTab = link.href.startsWith('http');
+            return <a key={link.href} href={link.href} target={opensNewTab ? '_blank' : undefined} rel={opensNewTab ? 'noreferrer' : undefined}>{link.label} <span aria-hidden="true">?</span></a>;
+          })}
+        </div>}
       </article>)}
     </div>
     <div className="skills-footer">
@@ -2362,19 +3210,182 @@ function SectionPanel({ controller }: { controller: RideController }) {
   </motion.section>;
 }
 
+type TouchPoint = { active: boolean; x: number; y: number; braking: boolean };
+
+const IDLE_TOUCH: TouchPoint = { active: false, x: 0, y: 0, braking: false };
+
+function getCircularTouchPoint(event: ReactPointerEvent<HTMLButtonElement>) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const radius = Math.max(1, rect.width * 0.31);
+  let x = event.clientX - (rect.left + rect.width / 2);
+  let y = event.clientY - (rect.top + rect.height / 2);
+  const distance = Math.hypot(x, y);
+  if (distance > radius) {
+    const scale = radius / distance;
+    x *= scale;
+    y *= scale;
+  }
+  return { x: x / radius, y: y / radius };
+}
+
+function TouchDriveControls({ drive }: { drive: DriveRef }) {
+  const [steeringTouch, setSteeringTouch] = useState<TouchPoint>(IDLE_TOUCH);
+  const [throttleTouch, setThrottleTouch] = useState<TouchPoint>(IDLE_TOUCH);
+  const steeringPointer = useRef<number | null>(null);
+  const throttlePointer = useRef<number | null>(null);
+  const throttleOriginY = useRef<number | null>(null);
+
+  const updateSteering = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (steeringPointer.current !== event.pointerId) return;
+    const point = getCircularTouchPoint(event);
+    const magnitude = Math.abs(point.x);
+    const steer = magnitude < 0.08
+      ? 0
+      : Math.sign(point.x) * ((magnitude - 0.08) / 0.92);
+    drive.current.touchSteer = THREE.MathUtils.clamp(steer, -1, 1);
+    setSteeringTouch({ active: true, ...point, braking: false });
+  };
+
+  const startSteering = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    steeringPointer.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updateSteering(event);
+  };
+
+  const releaseSteering = (event?: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event && steeringPointer.current !== event.pointerId) return;
+    steeringPointer.current = null;
+    drive.current.touchSteer = 0;
+    setSteeringTouch(IDLE_TOUCH);
+  };
+
+  const updateThrottle = (event: ReactPointerEvent<HTMLButtonElement>, allowBrake = true) => {
+    if (throttlePointer.current !== event.pointerId) return;
+    const point = getCircularTouchPoint(event);
+    const rect = event.currentTarget.getBoundingClientRect();
+    const dragDistance = event.clientY - (throttleOriginY.current ?? event.clientY);
+    const braking = allowBrake && dragDistance > rect.height * 0.22;
+    drive.current.touchThrottle = !braking;
+    drive.current.touchBrake = braking;
+    setThrottleTouch({ active: true, ...point, braking });
+  };
+
+  const startThrottle = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    throttlePointer.current = event.pointerId;
+    throttleOriginY.current = event.clientY;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updateThrottle(event, false);
+  };
+
+  const releaseThrottle = (event?: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event && throttlePointer.current !== event.pointerId) return;
+    throttlePointer.current = null;
+    throttleOriginY.current = null;
+    drive.current.touchThrottle = false;
+    drive.current.touchBrake = false;
+    setThrottleTouch(IDLE_TOUCH);
+  };
+
+  useEffect(() => {
+    const resetControls = () => {
+      steeringPointer.current = null;
+      throttlePointer.current = null;
+      throttleOriginY.current = null;
+      drive.current.touchSteer = 0;
+      drive.current.touchThrottle = false;
+      drive.current.touchBrake = false;
+      setSteeringTouch(IDLE_TOUCH);
+      setThrottleTouch(IDLE_TOUCH);
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) resetControls();
+    };
+    window.addEventListener('blur', resetControls);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('blur', resetControls);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      drive.current.touchSteer = 0;
+      drive.current.touchThrottle = false;
+      drive.current.touchBrake = false;
+    };
+  }, [drive]);
+
+  const steeringStyle = {
+    '--touch-x': `${steeringTouch.x * 31}px`,
+    '--touch-y': `${steeringTouch.y * 31}px`,
+  } as CSSProperties;
+  const throttleStyle = {
+    '--touch-x': `${throttleTouch.x * 25}px`,
+    '--touch-y': `${throttleTouch.y * 25}px`,
+  } as CSSProperties;
+
+  return <div className="mobile-touch-controls" aria-label="Touch motorcycle controls">
+    <div className="touch-control-group touch-navigation">
+      <span>NAVIGATION</span>
+      <button
+        className={'touch-control-ring' + (steeringTouch.active ? ' is-active' : '')}
+        style={steeringStyle}
+        type="button"
+        aria-label="Drag the navigation circle left or right to steer"
+        aria-pressed={steeringTouch.active}
+        onPointerDown={startSteering}
+        onPointerMove={updateSteering}
+        onPointerUp={releaseSteering}
+        onPointerCancel={releaseSteering}
+        onLostPointerCapture={releaseSteering}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        <i className="touch-control-guide" aria-hidden="true" />
+        <b className="touch-control-thumb"><em>DRAG</em></b>
+        <small>LEFT / RIGHT</small>
+      </button>
+    </div>
+
+    <div className="touch-control-group touch-acceleration">
+      <span>{throttleTouch.braking ? 'BRAKING' : 'ACCELERATION'}</span>
+      <button
+        className={'touch-control-ring touch-throttle' + (throttleTouch.active ? ' is-active' : '') + (throttleTouch.braking ? ' is-braking' : '')}
+        style={throttleStyle}
+        type="button"
+        aria-label="Hold the acceleration circle to speed up; drag down to brake"
+        aria-pressed={throttleTouch.active}
+        onPointerDown={startThrottle}
+        onPointerMove={updateThrottle}
+        onPointerUp={releaseThrottle}
+        onPointerCancel={releaseThrottle}
+        onLostPointerCapture={releaseThrottle}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        <i className="touch-control-guide" aria-hidden="true" />
+        <b className="touch-control-thumb"><em>{throttleTouch.braking ? 'BRAKE' : throttleTouch.active ? 'GO' : 'HOLD'}</em></b>
+        <small>{throttleTouch.braking ? 'RELEASE TO COAST' : 'PULL DOWN / BRAKE'}</small>
+      </button>
+    </div>
+  </div>;
+}
+
 function Hud({ controller, drive }: { controller: RideController; drive: DriveRef }) {
-  const { mode, countdown, vehicleSpeed, targetDistance, misses, aimLocked, targetVulnerable, mute, setMute, activeStop, begin, shoot } = controller;
+  const { mode, countdown, vehicleSpeed, targetDistance, misses, aimLocked, targetVulnerable, mute, audioReady, setMute, activeStop, begin, shoot } = controller;
   const [menuOpen, setMenuOpen] = useState(false);
   const [showFinale, setShowFinale] = useState(false);
 
   useEffect(() => {
-    if (mode !== 'finale') {
-      setShowFinale(false);
-      return;
+    if (mode === 'finale') {
+      if (showFinale) return;
+      const timer = window.setTimeout(() => setShowFinale(true), 3800);
+      return () => window.clearTimeout(timer);
     }
-    const timer = window.setTimeout(() => setShowFinale(true), 11500);
-    return () => window.clearTimeout(timer);
-  }, [mode]);
+    if (!(mode === 'reading' && controller.previewing && controller.previewReturnMode === 'finale')) {
+      setShowFinale(false);
+    }
+  }, [mode, controller.previewing, controller.previewReturnMode, showFinale]);
 
   const driving = mode === 'riding' || mode === 'target' || mode === 'aiming' || mode === 'summit';
   const playState = mode === 'intro' ? 'READY' : mode === 'countdown' ? 'START' : mode === 'finale' ? 'FINALE' : mode === 'summit' ? 'SUMMIT' : mode === 'reading' ? 'READING' : mode === 'shot' ? 'HIT' : 'CRUISE';
@@ -2389,6 +3400,27 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
       ? 'FINAL ASCENT'
       : activeStop?.label ?? 'SUMMIT';
   const routeNumber = mode === 'finale' || mode === 'summit' ? '06' : activeStop?.number ?? '06';
+  const journeyComplete = controller.completedCount === PORTFOLIO_STOPS.length;
+  const desktopInstruction = mode === 'riding'
+    ? 'FULL THROTTLE W / UP ARROW / HOLD MOUSE / A D TO LEAN / S TO BRAKE'
+    : mode === 'target'
+      ? 'TARGET AHEAD / MAINTAIN SPEED / SLOW-MO AT CLOSE RANGE'
+      : mode === 'aiming'
+        ? 'TRACK THE MOVING CORE / GOLD = FIRE / RED = WAIT'
+        : 'FINAL ASCENT / REACH THE OVERLOOK TO COMPLETE THE JOURNEY';
+  const touchInstruction = mode === 'riding'
+    ? 'DRAG LEFT CIRCLE TO STEER / HOLD RIGHT CIRCLE TO ACCELERATE'
+    : mode === 'target'
+      ? 'KEEP HOLDING ACCELERATE / TARGET AHEAD'
+      : mode === 'aiming'
+        ? 'TAP FIRE WHEN GOLD / DRAG LEFT TO STAY ON LINE'
+        : 'HOLD ACCELERATE / DRAG LEFT TO REACH THE OVERLOOK';
+
+  const restartJourney = () => {
+    setMenuOpen(false);
+    setShowFinale(false);
+    begin();
+  };
 
   const hold = (control: 'forward' | 'brake' | 'left' | 'right', active: boolean) => {
     drive.current[control] = active;
@@ -2398,7 +3430,19 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
     <header className="ride-header">
       <button className="ride-mark" type="button" onClick={() => window.location.reload()} aria-label="Restart experience"><span>AR</span><i>APOORVA RAWAT</i></button>
       <div className="header-actions">
-        <button className="sound-button" type="button" onClick={() => setMute(!mute)} aria-label={mute ? 'Enable sound' : 'Mute sound'}>{mute ? 'SOUND OFF' : 'SOUND ON'}</button>
+        <button
+          className={'sound-button' + (mute ? ' is-muted' : !audioReady ? ' is-pending' : '')}
+          type="button"
+          onClick={() => {
+            if (!audioReady) setMute(false);
+            else setMute(!mute);
+          }}
+          aria-label={!audioReady ? 'Enable background music and bike engine' : mute ? 'Turn on background music and bike engine' : 'Mute background music and bike engine'}
+          aria-pressed={audioReady && !mute}
+          title="Background music and bike engine"
+        >
+          {mute ? 'AUDIO OFF' : audioReady ? 'AUDIO ON' : 'AUDIO READY'} <span aria-hidden="true">{audioReady && !mute ? '●' : '○'}</span>
+        </button>
         <button className="menu-button-3d" type="button" onClick={() => setMenuOpen((value) => !value)} aria-expanded={menuOpen}>MENU <b>+</b></button>
       </div>
     </header>
@@ -2408,29 +3452,40 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
       {PORTFOLIO_STOPS.map((portfolioStop, index) => {
         const complete = controller.completedStops.includes(index);
         const active = index === controller.activeIndex && mode !== 'summit' && mode !== 'finale';
+        const selected = controller.previewing && controller.panelStop?.id === portfolioStop.id;
+        const rideInProgress = mode !== 'finale' && mode !== 'intro';
+        const disabled = rideInProgress && !active && !selected;
         return <button
           key={portfolioStop.id}
-          className={complete ? 'is-complete' : active ? 'is-active' : ''}
+          className={[complete && 'is-complete', (active || selected) && 'is-active', disabled && 'is-disabled'].filter(Boolean).join(' ')}
           type="button"
+          aria-current={selected ? 'page' : undefined}
+          disabled={disabled}
           onClick={() => {
+            if (disabled) return;
             setMenuOpen(false);
             controller.openSection(index);
           }}
         >
           <span>{portfolioStop.number} / {portfolioStop.label}</span>
-          <i className="route-menu-status">{complete ? 'UNLOCKED' : active ? 'ON ROUTE' : 'QUICK VIEW'}</i>
+          <i className="route-menu-status">{selected ? 'VIEWING' : complete ? (mode === 'finale' ? 'VIEW DETAILS' : 'UNLOCKED') : active ? 'ON ROUTE' : rideInProgress ? 'LOCKED' : 'VIEW DETAILS'}</i>
         </button>;
       })}
       <button
-        className={mode === 'finale' ? 'is-active' : ''}
+        className={mode === 'finale' && !controller.previewing ? 'is-active' : ''}
         type="button"
+        disabled={mode !== 'finale' && mode !== 'intro'}
         onClick={() => {
           setMenuOpen(false);
           controller.openFinale();
         }}
       >
         <span>★ / SUMMIT FINALE</span>
-        <i className="route-menu-status">{mode === 'finale' ? 'ACTIVE' : 'PLAY FINALE'}</i>
+        <i className="route-menu-status">{mode === 'finale' ? (controller.previewing ? 'BACK TO SUMMIT' : 'ACTIVE') : 'PLAY FINALE'}</i>
+      </button>
+      <button className="route-menu-restart" type="button" onClick={restartJourney}>
+        <span>↺ / RESTART JOURNEY</span>
+        <i className="route-menu-status">FROM START</i>
       </button>
     </motion.nav>}</AnimatePresence>
 
@@ -2449,6 +3504,8 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
         <button className="drive-right" type="button" aria-label="Steer right" onPointerDown={(event) => { event.preventDefault(); hold('right', true); }} onPointerUp={() => hold('right', false)} onPointerCancel={() => hold('right', false)} onPointerLeave={() => hold('right', false)}>→<i>D</i></button>
       </div>
 
+      <TouchDriveControls drive={drive} />
+
       {(mode === 'target' || mode === 'aiming') && <div className="fire-pad" aria-label="Fire weapon at target">
         <button
           className={'fire-trigger-btn' + (targetVulnerable ? ' is-vulnerable' : '')}
@@ -2464,10 +3521,10 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
 
     <AnimatePresence>
       {mode === 'intro' && <motion.section className="entry-screen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-        <p>APOORVA RAWAT / INTERACTIVE PORTFOLIO</p>
-        <h1>RIDE INTO<br /><em>WHAT'S NEXT.</em></h1>
-        <div><span>Six targets. One high-speed Himalayan ascent.</span><button type="button" onClick={begin}>ENTER EXPERIENCE <b>↗</b></button></div>
-        <small>HOLD W / ↑ FOR FULL THROTTLE / A D TO STEER / S TO BRAKE</small>
+        <p>APOORVA RAWAT PORTFOLIO</p>
+        <h1>RIDE<br /><em>WHAT'S NEXT.</em></h1>
+        <div><span>Six targets. One high-speed Himalayan ascent.</span><button type="button" onClick={begin}>TAKE THE RIDE <b>↗</b></button></div>
+        <small>AUDIO STARTS ON ENTRY / HOLD W / ↑ FOR FULL THROTTLE / A D TO STEER / S TO BRAKE</small>
       </motion.section>}
 
       {mode === 'countdown' && <motion.section className="countdown-overlay" key={countdown} initial={{ opacity: 0, scale: 0.78, filter: 'blur(14px)' }} animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }} exit={{ opacity: 0, scale: 1.14, filter: 'blur(8px)' }} transition={{ duration: 0.16 }}>
@@ -2477,7 +3534,7 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
       </motion.section>}
 
       {activeStop && (mode === 'target' || mode === 'aiming' || mode === 'shot') && <motion.section
-        className={'target-readout' + (targetVulnerable ? ' is-open' : '') + (targetVulnerable && aimLocked ? ' is-locked' : '')}
+        className={'target-readout' + (targetVulnerable ? ' is-open' : '') + (aimLocked ? ' is-locked' : '')}
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0 }}
@@ -2497,24 +3554,32 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
         {mode === 'aiming' && misses >= 2 && <small className="aim-assist">AIM CALIBRATED</small>}
       </motion.section>}
 
-      {mode === 'reading' && <SectionPanel controller={controller} />}
+      {(mode === 'reading' || (mode === 'finale' && controller.previewing)) && <SectionPanel key={controller.panelStop?.id ?? 'section'} controller={controller} />}
 
-      {mode === 'finale' && !showFinale && <motion.p className="finale-sequence" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>PARK / DISMOUNT / HELMET OFF / SUNSET OVERLOOK</motion.p>}
+      {mode === 'finale' && !controller.previewing && !showFinale && <motion.p className="finale-sequence" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>KICKSTAND DOWN / SUMMIT VIEW</motion.p>}
 
-      {mode === 'finale' && showFinale && <motion.section className="finale-overlay" initial={{ opacity: 0, y: 28 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1.1, ease: [0.16, 1, 0.3, 1] }} aria-labelledby="summit-title">
-        <p className="finale-kicker">SUMMIT / JOURNEY COMPLETE</p>
-        <h2 id="summit-title">THE VIEW<br />AFTER THE CLIMB.</h2>
-        <p className="finale-copy">Apoorva Rawat is a full-stack developer crafting interactive digital experiences where thoughtful engineering meets a strong visual point of view.</p>
-        <div className="finale-links" aria-label="Contact channels"><span>EMAIL</span><span>LINKEDIN</span><span>GITHUB</span></div>
+      {mode === 'finale' && !controller.previewing && showFinale && <motion.section
+        className="finale-overlay"
+        initial={{ opacity: 0, y: 24 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 18 }}
+        transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+        aria-labelledby="finale-title"
+      >
+        <p className="finale-kicker">{journeyComplete ? 'JOURNEY COMPLETE / ' + PORTFOLIO_STOPS.length + ' CHECKPOINTS' : 'SUMMIT PREVIEW / DIRECT ACCESS'}</p>
+        <h2 id="finale-title">JUST THE END.<br /><em>RIDE STILL GOING ON.</em></h2>
+        <p className="finale-copy">{journeyComplete
+          ? 'Every portfolio card is unlocked. Open the menu and choose any card to revisit it.'
+          : 'Explore any portfolio card from the menu, or restart the journey and unlock every checkpoint on the road.'}</p>
         <div className="finale-actions">
-          <button type="button" onClick={() => window.location.reload()}>RESTART RIDE</button>
-          <button type="button" onClick={() => setMenuOpen(true)}>VIEW SECTIONS</button>
+          <button className="finale-menu-action" type="button" onClick={() => setMenuOpen(true)}>EXPLORE CARDS <b>+</b></button>
+          <button type="button" onClick={restartJourney}>RESTART JOURNEY <b>↺</b></button>
         </div>
       </motion.section>}
     </AnimatePresence>
 
     {(mode === 'target' || mode === 'aiming') && <div className={'crosshair-3d' + (targetVulnerable && aimLocked ? ' is-hot' : '')} aria-hidden="true"><i /></div>}
-    {driving && <p className="ride-instruction">{mode === 'riding'
+    {driving && <p className="ride-instruction" aria-label={desktopInstruction} data-touch-instruction={touchInstruction}>{mode === 'riding'
       ? 'FULL THROTTLE W / ↑ / HOLD MOUSE / A D TO LEAN / S TO BRAKE'
       : mode === 'target'
         ? 'TARGET AHEAD / MAINTAIN SPEED / SLOW-MO AT CLOSE RANGE'
@@ -2559,6 +3624,9 @@ export default function CinematicRide() {
       drive.current.brake = false;
       drive.current.left = false;
       drive.current.right = false;
+      drive.current.touchSteer = 0;
+      drive.current.touchThrottle = false;
+      drive.current.touchBrake = false;
       drive.current.gestureThrottle = 0;
       releasePointer();
     };

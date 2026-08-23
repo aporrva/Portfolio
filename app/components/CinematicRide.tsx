@@ -2127,44 +2127,37 @@ function Scene({ controller, drive, lowQuality }: { controller: RideController; 
 function SectionPanel({ controller }: { controller: RideController }) {
   const portfolioStop = controller.panelStop;
   if (!portfolioStop) return null;
+  const actionLabel = controller.previewing
+    ? 'RETURN TO RIDE'
+    : portfolioStop.id === 'contact'
+      ? 'RIDE TO SUMMIT'
+      : 'CONTINUE RIDE';
 
-  return <motion.article
-    className="detail-panel"
-    initial={{ opacity: 0, y: 18, scale: 0.985 }}
-    animate={{ opacity: 1, y: 0, scale: 1 }}
-    exit={{ opacity: 0, y: 14, scale: 0.985 }}
-    transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-    aria-labelledby="panel-heading"
+  return <motion.section
+    className="skills-overlay"
+    initial={{ opacity: 0, y: 26 }}
+    animate={{ opacity: 1, y: 0 }}
+    exit={{ opacity: 0, y: 18 }}
+    transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+    aria-labelledby={'section-' + portfolioStop.id}
   >
-    <div className="panel-header">
-      <div className="panel-kicker">
-        <span>TARGET UNLOCKED / {portfolioStop.number}</span>
-        <b>{portfolioStop.eyebrow}</b>
-      </div>
-      <button className="panel-close" type="button" onClick={controller.continueRide} aria-label="Close dossier">X</button>
+    <div className="skills-heading">
+      <p>{portfolioStop.number} / {controller.previewing ? 'DIRECT ACCESS' : portfolioStop.eyebrow}</p>
+      <h2 id={'section-' + portfolioStop.id}>{portfolioStop.heading[0]}<br /><em>{portfolioStop.heading[1]}</em></h2>
+      <span>{controller.previewing ? 'Quick view - route progress is unchanged' : 'World speed reduced to 20%'}</span>
+      <p className="section-note">{portfolioStop.note}</p>
     </div>
-
-    <div className="panel-title-block">
-      <p className="panel-pretitle">PORTFOLIO DOSSIER</p>
-      <h2 id="panel-heading">{portfolioStop.heading[0]}<br /><em>{portfolioStop.heading[1]}</em></h2>
+    <div className="skills-columns">
+      {portfolioStop.groups.map((group) => <article key={group.label}>
+        <b>{group.label}</b>
+        <p>{group.lines.map((line, index) => <span key={line}>{line}{index < group.lines.length - 1 && <br />}</span>)}</p>
+      </article>)}
     </div>
-
-    <div className="panel-grid">
-      {portfolioStop.groups.map((group) => (
-        <section key={group.label} className="panel-group" aria-label={group.label}>
-          <h3>{group.label}</h3>
-          <ul>{group.lines.map((line) => <li key={line}>{line}</li>)}</ul>
-        </section>
-      ))}
+    <div className="skills-footer">
+      <span>{controller.previewing ? 'MENU VIEW / NO CHECKPOINT SKIPPED' : portfolioStop.id === 'contact' ? 'ALL CHECKPOINTS COMPLETE' : 'NEXT TARGET IS WAITING'}</span>
+      <button type="button" onClick={controller.continueRide}>{actionLabel} <b>↗</b></button>
     </div>
-
-    <div className="panel-footer">
-      <p className="panel-note">{portfolioStop.note}</p>
-      <button className="panel-cta" type="button" onClick={controller.continueRide}>
-        {controller.previewing ? 'RESUME ROUTE ↗' : 'CONTINUE RIDE ↗'}
-      </button>
-    </div>
-  </motion.article>;
+  </motion.section>;
 }
 
 function Hud({ controller, drive }: { controller: RideController; drive: DriveRef }) {

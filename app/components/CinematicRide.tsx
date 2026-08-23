@@ -2,7 +2,16 @@
 
 import { AnimatePresence, motion } from 'framer-motion';
 import gsap from 'gsap';
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { Canvas, ThreeEvent, useFrame, useThree } from '@react-three/fiber';
 import { AdaptiveDpr, PerformanceMonitor, Sky, Sparkles, useGLTF } from '@react-three/drei';
 import { Bloom, EffectComposer, SMAA, Vignette } from '@react-three/postprocessing';
@@ -45,6 +54,7 @@ type RideController = {
   setAimLocked: (value: boolean) => void;
   setTargetVulnerable: (value: boolean) => void;
   mute: boolean;
+  audioReady: boolean;
   setMute: (value: boolean) => void;
   mode: RideState;
   countdown: number;
@@ -78,6 +88,9 @@ type DriveRuntime = {
   wheelAngle: number;
   pointerX: number;
   pointerY: number;
+  touchSteer: number;
+  touchThrottle: boolean;
+  touchBrake: boolean;
   mouseThrottle: boolean;
   gestureThrottle: number;
   forward: boolean;
@@ -104,6 +117,16 @@ const TARGET_LOCK_DISTANCE = 12.0;
 const RIDE_START_DISTANCE = 25;
 const SUMMIT_DISTANCE = 880;
 const SUN_POSITION: [number, number, number] = [-24, 75, 920];
+const MUSIC_STEP_SECONDS = 0.56;
+const MUSIC_SCHEDULER_MS = 50;
+const MUSIC_LOOKAHEAD_SECONDS = 0.14;
+const MUSIC_MELODY = [
+  220, 261.63, 329.63, 261.63,
+  174.61, 220, 261.63, 220,
+  196, 246.94, 293.66, 246.94,
+  164.81, 207.65, 246.94, 207.65,
+];
+const MUSIC_ROOTS = [110, 87.31, 98, 82.41];
 
 const roadCurve = new THREE.CatmullRomCurve3([
   new THREE.Vector3(-6, 0, -100),
@@ -167,147 +190,156 @@ function getEffectiveStop(index: number, distances?: number[]): PortfolioStop | 
   };
 }
 
-const PORTFOLIO_STOPS: PortfolioStop[] = [
-  stop(
-    'about',
-    'ABOUT',
-    '01',
-    90,
-    -1,
-    'MEET THE RIDER',
-    'RIDER PROFILE',
-    ['DESIGN THINKING.', 'ENGINEERING DRIVE.'],
-    [
-      { label: 'PROFILE', lines: ['Full-stack Software Engineer', 'Freelance Software Engineer', "App developer", "Web Developer"] },
-      { label: 'SPECIALISM', lines: ['React', 'React Native', 'Node.js' , 'django'] },
-      
-    ],
-    'I build production-ready web experiences and bring the communication, problem-solving, and mentorship skills of a former teacher.'
-  ),
-  stop(
-    'skills',
-    'SKILLS',
-    '02',
-    180,
-    1,
-    'UNLOCK THE TOOLKIT',
-    'SKILLS UNLOCKED',
-    ['THE TOOLKIT', 'BEHIND THE RIDE.'],
-    [
-      { label: 'FRONTEND', lines: ['React & React Native', 'Next.js & TypeScript', 'Tailwind CSS'] },
-      { label: 'BACKEND', lines: ['Node.js & Express', 'REST APIs & EmailJS', 'MySQL'] },
-      { label: 'TOOLS', lines: ['Git & GitHub', 'Figma & VS Code', 'Netlify'] },
-    ],
-    'A practical full-stack toolkit for responsive interfaces, API-integrated products, and maintainable component systems.'
-  ),
-  stop(
-    'experience',
-    'EXPERIENCE',
-    '03',
-    270,
-    -1,
-    'TRACE THE JOURNEY',
-    'EXPERIENCE UNLOCKED',
-    ['BUILT THROUGH', 'REAL DELIVERY.'],
-    [
-      {
-        label: 'PRITHU / CURRENT',
-        lines: ['Currently working with Prithu', 'Climate-tech web delivery'],
-        links: [{ label: 'VISIT PRITHU.EARTH', href: 'https://prithu.earth/' }],
-      },
-      { label: 'FREELANCE / SEP 2025-PRESENT', lines: ['React, TypeScript & Tailwind', 'Node.js, APIs & EmailJS'] },
-      { label: 'VIDYATRI / 2023-2025', lines: ['Chemistry Teacher (ICSE)', 'Lessons, experiments & mentoring'] },
-    ],
-    'Currently contributing at Prithu while continuing freelance web development, following two years of teaching at Vidyatri Public School, Kotdwar.'
-  ),
-  stop(
-    'projects',
-    'PROJECTS',
-    '04',
-    360,
-    1,
-    'OPEN THE GARAGE',
-    'PROJECT DATABASE',
-    ['SELECTED WORK.', 'MADE TO MOVE.'],
-    [
-      {
-        label: 'PRITHU.EARTH',
-        lines: ['Climate-tech company website', 'Sole end-to-end website build', 'High-integrity carbon ecosystems'],
-        links: [{ label: 'LIVE SITE', href: 'https://prithu.earth/' }],
-      },
-      {
-        label: 'ETHREAL DESIGN',
-        lines: ['Creative digital agency', 'React / TypeScript / Next.js'],
-        links: [
-          { label: 'LIVE SITE', href: 'https://etherealdesign.io/' },
-          { label: 'GITHUB', href: 'https://github.com/aporrva/Ethereal-Design' },
-        ],
-      },
-      {
-        label: 'MANI ARTISAN JEWELLERY',
-        lines: ['Full-featured online shop', 'Next.js / Tailwind / React'],
-        links: [
-          { label: 'LIVE SITE', href: 'https://mani-artisan-jewellery.netlify.app/' },
-          { label: 'GITHUB', href: 'https://github.com/aporrva/Mani-Artisan-Jewellery' },
-        ],
-      },
-      {
-        label: 'FORM FILLING WEBSITE',
-        lines: ['Secure, user-friendly forms', 'React / Express / Tailwind'],
-        links: [
-          { label: 'LIVE SITE', href: 'https://form-filling-website.netlify.app/' },
-          { label: 'GITHUB', href: 'https://github.com/aporrva/Form-Filling-Website' },
-        ],
-      },
-    ],
-    'Selected work from the resume, led by Prithu.earth - independently delivered as a complete website project.'
-  ),
-  stop(
-    'resume',
-    'RESUME',
-    '05',
-    450,
-    -1,
-    'VIEW THE RECORD',
-    'RESUME UNLOCKED',
-    ['THE ROUTE.', 'AT A GLANCE.'],
-    [
-      { label: 'CORE', lines: ['React / React Native', 'Next.js / TypeScript', 'Responsive UI systems'] },
-      { label: 'BACKEND', lines: ['Node.js / Express', 'REST APIs / EmailJS', 'MySQL'] },
-      { label: 'EDUCATION', lines: ['B.Sc. Mathematics (PCM)', 'Graduated 2025', 'English & Hindi'] },
-      { label: 'ACHIEVEMENTS', lines: ['State & district athletics', 'State & district basketball'] },
-    ],
-    'Full-stack engineering, component architecture, API handling, clean state management, responsive layouts, and interactive UX.'
-  ),
-  stop(
-    'contact',
-    'CONTACT',
-    '06',
-    540,
-    1,
-    'START A CONVERSATION',
-    'FINAL CHECKPOINT',
-    ["LET'S BUILD", "WHAT'S NEXT."],
-    [
-      {
-        label: 'EMAIL',
-        lines: ['apoorvarawat87@gmail.com'],
-        links: [{ label: 'SEND EMAIL', href: 'mailto:apoorvarawat87@gmail.com' }],
-      },
-      {
-        label: 'GITHUB',
-        lines: ['github.com/aporrva'],
-        links: [{ label: 'VIEW PROFILE', href: 'https://github.com/aporrva' }],
-      },
-      {
-        label: 'PORTFOLIO',
-        lines: ['apurva-rawat.com'],
-        links: [{ label: 'OPEN WEBSITE', href: 'https://apurva-rawat.com/' }],
-      },
-      { label: 'BASED IN', lines: ['Kotdwara, Uttarakhand', 'India'] },
-    ],
-    'Open to thoughtful freelance and full-stack opportunities where strong engineering and clear communication both matter.'
-  ),
+const PORTFOLIO_STOPS: PortfolioStop[] = [stop(
+  'about',
+  'ABOUT',
+  '01',
+  90,
+  -1,
+  'MEET THE RIDER',
+  'ABOUT MYSELF',
+  ['APOORVA RAWAT', ""],
+  [
+    { label: 'PROFILE', lines: ['Full-stack Software Engineer', 'App Developer', 'Web Developer'] },
+    { label: 'PERSONAL DETAILS', lines: ['21 Years', 'Female'] },
+    { label: 'SPECIALISM', lines: ['React', 'React Native', 'Express.js'] },
+  ],
+  'I build production-ready web experiences and bring the communication, problem-solving, and mentorship skills of a former teacher.'
+),
+
+stop(
+  'skills',
+  'SKILLS',
+  '02',
+  180,
+  1,
+  'THROUGH THE JOURNEY',
+  'SKILLS UNLOCKED',
+  ['THE TOOLKIT', 'BEHIND THE RIDE.'],
+  [
+    { label: 'FRONTEND', lines: ['HTML', 'CSS', 'JavaScript', 'React', 'TypeScript', 'Tailwind CSS', 'React Native', 'Next.js'] },
+    { label: 'BACKEND', lines: ['Node.js & Express', 'REST APIs', 'EmailJS', 'MySQL', 'Django'] },
+    { label: 'TOOLS', lines: ['Git', 'GitHub', 'Figma', 'Netlify'] },
+  ],
+  'A practical full-stack toolkit for responsive interfaces, API-integrated products, and maintainable component systems.'
+),
+
+stop(
+  'experience',
+  'EXPERIENCE',
+  '03',
+  270,
+  -1,
+  'TRACE THE JOURNEY',
+  'EXPERIENCE UNLOCKED',
+  ['BUILT THROUGH', 'REAL EXPERIENCE.'],
+  [
+    {
+      label: 'PRITHU / CURRENT',
+      lines: ['Currently working with Prithu'],
+      links: [{ label: 'VISIT PRITHU.EARTH', href: 'https://prithu.earth/' }],
+    },
+    {
+      label: 'FREELANCE / SEP 2025-PRESENT',
+      lines: ['Worked in Ethereal Designs'],
+      links: [{ label: 'VISIT ETHEREALDESIGN.IO', href: 'https://etherealdesign.io/' }],
+    },
+    {
+      label: '2023-2025',
+      lines: ['Chemistry Teacher', 'Lessons, experiments & mentoring'],
+    },
+  ],
+  'Currently contributing at Prithu while continuing freelance web development, following two years of teaching at Vidyatri Public School, Kotdwar.'
+),
+
+stop(
+  'projects',
+  'PROJECTS',
+  '04',
+  360,
+  1,
+  'OPEN THE GARAGE',
+  'PROJECT DATABASE',
+  ['SELECTED WORK.', 'BUILT TO LAST.'],
+  [
+    {
+      label: 'PRITHU.EARTH',
+      lines: ['Climate-tech company website', 'Sole end-to-end website build', 'High-integrity carbon ecosystems'],
+      links: [{ label: 'LIVE SITE', href: 'https://prithu.earth/' }],
+    },
+    {
+      label: 'ETHREAL DESIGN',
+      lines: ['Creative digital agency', 'React / TypeScript / Next.js'],
+      links: [
+        { label: 'LIVE SITE', href: 'https://etherealdesign.io/' },
+      ],
+    },
+    {
+      label: 'MANI ARTISAN JEWELLERY',
+      lines: ['Full-featured online shop', 'Next.js / Tailwind / React'],
+      links: [
+        { label: 'LIVE SITE', href: 'https://mani-artisan-jewellery.netlify.app/' },
+        { label: 'GITHUB', href: 'https://github.com/aporrva/Mani-Artisan-Jewellery' },
+      ],
+    },
+    {
+      label: 'FORM FILLING WEBSITE',
+      lines: ['Secure, user-friendly forms', 'React / Express / Tailwind'],
+      links: [
+        { label: 'LIVE SITE', href: 'https://form-filling-website.netlify.app/' },
+        { label: 'GITHUB', href: 'https://github.com/aporrva/Form-Filling-Website' },
+      ],
+    },
+  ],
+  'Selected work from my experience, led by Prithu.earth — independently delivered as a complete website project.'
+),
+
+stop(
+  'resume',
+  'RESUME',
+  '05',
+  450,
+  -1,
+  'VIEW THE RECORD',
+  'RESUME UNLOCKED',
+  ['THE ROUTE.', 'AT A GLANCE.'],
+  [
+    { label: 'FRONTEND', lines: ['React / React Native', 'Next.js / TypeScript', 'Responsive UI systems'] },
+    { label: 'BACKEND', lines: ['Node.js / Express', 'REST APIs / EmailJS', 'MySQL'] },
+    { label: 'EDUCATION', lines: ['B.Sc. Mathematics (PCM)'] },
+    { label: 'ACHIEVEMENTS', lines: ['District-Level High Jumper', "University's Top Long and High Jumper", 'District-Level Basketball Player'] },
+  ],
+  'Full-stack engineering, component architecture, API handling, clean state management, responsive layouts, and interactive UX.'
+),
+
+stop(
+  'contact',
+  'CONTACT',
+  '06',
+  540,
+  1,
+  'START A CONVERSATION',
+  'FINAL CHECKPOINT',
+  ["LET'S BUILD", "WHAT'S NEXT."],
+  [
+    {
+      label: 'EMAIL',
+      lines: ['apoorvarawat87@gmail.com'],
+      links: [{ label: 'SEND EMAIL', href: 'mailto:apoorvarawat87@gmail.com' }],
+    },
+    {
+      label: 'GITHUB',
+      lines: ['github.com/aporrva'],
+      links: [{ label: 'VIEW PROFILE', href: 'https://github.com/aporrva' }],
+    },
+    {
+      label: 'PORTFOLIO',
+      lines: ['apoorva-rawat.in'],
+    },
+    { label: 'BASED IN', lines: ['Kotdwara, Uttarakhand', 'India'] },
+  ],
+  'Open to thoughtful freelance and full-stack opportunities where strong engineering and clear communication both matter.'
+),
 ];
 function createDriveRuntime(): DriveRuntime {
   return {
@@ -319,6 +351,9 @@ function createDriveRuntime(): DriveRuntime {
     wheelAngle: 0,
     pointerX: 0,
     pointerY: 0,
+    touchSteer: 0,
+    touchThrottle: false,
+    touchBrake: false,
     mouseThrottle: false,
     gestureThrottle: 0,
     forward: false,
@@ -441,7 +476,8 @@ function useRideController(): RideController {
   const [missMessage, setMissMessage] = useState('');
   const [rideReset, setRideReset] = useState(0);
   const [checkpointReset, setCheckpointReset] = useState(0);
-  const [mute, setMute] = useState(false);
+  const [mute, setMuteState] = useState(false);
+  const [audioReady, setAudioReady] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [completedStops, setCompletedStops] = useState<number[]>([]);
   const [targetQueue, setTargetQueue] = useState<number[]>([0, 1, 2, 3, 4, 5]);
@@ -462,11 +498,24 @@ function useRideController(): RideController {
   const targetVulnerableRef = useRef(false);
   const targetDistanceRef = useRef(initialDistance);
   const contextRef = useRef<AudioContext | null>(null);
+  const resumePromiseRef = useRef<Promise<void> | null>(null);
+  const masterRef = useRef<GainNode | null>(null);
+  const limiterRef = useRef<DynamicsCompressorNode | null>(null);
+  const disposedRef = useRef(false);
+  const soundTimeoutsRef = useRef<Set<number>>(new Set());
   const engineRef = useRef<{
     low: OscillatorNode;
+    mid: OscillatorNode;
     high: OscillatorNode;
     gain: GainNode;
     filter: BiquadFilterNode;
+  } | null>(null);
+  const musicRef = useRef<{
+    gain: GainNode;
+    filter: BiquadFilterNode;
+    timer: number;
+    step: number;
+    nextNoteTime: number;
   } | null>(null);
   const mainTimeline = useRef<gsap.core.Timeline | null>(null);
   const reportedApproach = useRef(0);
@@ -479,56 +528,234 @@ function useRideController(): RideController {
   previewingRef.current = previewing;
 
   function getAudioContext() {
-    if (typeof window === 'undefined') return null;
+    if (disposedRef.current || typeof window === 'undefined') return null;
     const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) return null;
-    const context = contextRef.current ?? new AudioContextClass();
+    const existing = contextRef.current;
+    if (existing && existing.state !== 'closed') return existing;
+    const context = new AudioContextClass();
+    context.addEventListener('statechange', () => {
+      if (!disposedRef.current && contextRef.current === context) {
+        setAudioReady(context.state === 'running');
+      }
+    });
     contextRef.current = context;
-    if (context.state === 'suspended') void context.resume();
     return context;
+  }
+
+  function resumeAudioContext(context: AudioContext) {
+    if (context.state === 'running') return Promise.resolve();
+    if (context.state === 'closed') return Promise.reject(new Error('Audio context is closed'));
+    if (resumePromiseRef.current) return resumePromiseRef.current;
+    const promise = context.resume().then(() => undefined);
+    resumePromiseRef.current = promise;
+    const clearResumePromise = () => {
+      if (resumePromiseRef.current === promise) resumePromiseRef.current = null;
+    };
+    void promise.then(clearResumePromise, clearResumePromise);
+    return promise;
+  }
+
+  function getMasterOutput(context: AudioContext) {
+    if (masterRef.current) return masterRef.current;
+    const master = context.createGain();
+    const limiter = context.createDynamicsCompressor();
+    master.gain.value = muteRef.current ? 0.0001 : 0.85;
+    limiter.threshold.value = -16;
+    limiter.knee.value = 18;
+    limiter.ratio.value = 4;
+    limiter.attack.value = 0.006;
+    limiter.release.value = 0.24;
+    master.connect(limiter).connect(context.destination);
+    masterRef.current = master;
+    limiterRef.current = limiter;
+    return master;
+  }
+
+  function updateMaster() {
+    const context = contextRef.current;
+    const master = masterRef.current;
+    if (!context || !master || context.state === 'closed') return;
+    master.gain.setTargetAtTime(muteRef.current ? 0.0001 : 0.85, context.currentTime, 0.025);
   }
 
   function updateEngine(speedValue: number) {
     const engine = engineRef.current;
     const context = contextRef.current;
     if (!engine || !context || context.state === 'closed') return;
-    const active = ['riding', 'target', 'aiming', 'shot', 'reading', 'summit'].includes(modeRef.current);
+    const active = ['countdown', 'riding', 'target', 'aiming', 'shot', 'reading', 'summit'].includes(modeRef.current);
     const now = context.currentTime;
-    const level = !muteRef.current && active ? 0.009 + speedValue * 0.031 : 0.0001;
-    engine.gain.gain.setTargetAtTime(level, now, 0.08);
-    engine.low.frequency.setTargetAtTime(48 + speedValue * 92, now, 0.055);
-    engine.high.frequency.setTargetAtTime(102 + speedValue * 215, now, 0.05);
-    engine.filter.frequency.setTargetAtTime(380 + speedValue * 1450, now, 0.07);
+    const level = !muteRef.current && active ? 0.024 + speedValue * 0.042 : 0.0001;
+    const fundamental = 62 + speedValue * 88;
+    engine.gain.gain.setTargetAtTime(level, now, 0.065);
+    engine.low.frequency.setTargetAtTime(fundamental, now, 0.055);
+    engine.mid.frequency.setTargetAtTime(fundamental * 2.03, now, 0.05);
+    engine.high.frequency.setTargetAtTime(fundamental * 4.08, now, 0.045);
+    engine.filter.frequency.setTargetAtTime(1100 + speedValue * 2500, now, 0.07);
   }
 
-  function ensureEngine() {
-    const context = getAudioContext();
-    if (!context || engineRef.current) return;
+  function ensureEngine(context: AudioContext) {
+    if (engineRef.current) return;
     const low = context.createOscillator();
+    const mid = context.createOscillator();
     const high = context.createOscillator();
     const filter = context.createBiquadFilter();
     const gain = context.createGain();
+    const lowMix = context.createGain();
+    const midMix = context.createGain();
+    const highMix = context.createGain();
     low.type = 'sawtooth';
+    mid.type = 'square';
     high.type = 'triangle';
-    low.frequency.value = 48;
-    high.frequency.value = 102;
+    low.frequency.value = 62;
+    mid.frequency.value = 126;
+    high.frequency.value = 253;
     filter.type = 'lowpass';
-    filter.frequency.value = 420;
-    filter.Q.value = 1.15;
+    filter.frequency.value = 1100;
+    filter.Q.value = 1.35;
     gain.gain.value = 0.0001;
-    low.connect(filter);
-    high.connect(filter);
-    filter.connect(gain).connect(context.destination);
+    lowMix.gain.value = 0.62;
+    midMix.gain.value = 0.25;
+    highMix.gain.value = 0.13;
+    low.connect(lowMix).connect(filter);
+    mid.connect(midMix).connect(filter);
+    high.connect(highMix).connect(filter);
+    filter.connect(gain).connect(getMasterOutput(context));
     low.start();
+    mid.start();
     high.start();
-    engineRef.current = { low, high, gain, filter };
+    engineRef.current = { low, mid, high, gain, filter };
     updateEngine(reportedSpeed.current);
+  }
+
+  function scheduleMusicTone(
+    context: AudioContext,
+    output: AudioNode,
+    frequency: number,
+    startAt: number,
+    duration: number,
+    type: OscillatorType,
+    peak: number,
+  ) {
+    const oscillator = context.createOscillator();
+    const envelope = context.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, startAt);
+    envelope.gain.setValueAtTime(0.0001, startAt);
+    envelope.gain.exponentialRampToValueAtTime(peak, startAt + Math.min(0.09, duration * 0.25));
+    envelope.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+    oscillator.connect(envelope).connect(output);
+    oscillator.onended = () => {
+      oscillator.disconnect();
+      envelope.disconnect();
+    };
+    oscillator.start(startAt);
+    oscillator.stop(startAt + duration + 0.04);
+  }
+
+  function scheduleMusicStep(startAt: number) {
+    const context = contextRef.current;
+    const music = musicRef.current;
+    if (!context || !music || context.state !== 'running' || muteRef.current || disposedRef.current) return;
+    const step = music.step % MUSIC_MELODY.length;
+    const chord = Math.floor(step / 4) % MUSIC_ROOTS.length;
+    scheduleMusicTone(context, music.filter, MUSIC_MELODY[step], startAt, 0.52, 'triangle', 0.055);
+    if (step % 2 === 0) {
+      scheduleMusicTone(context, music.filter, MUSIC_ROOTS[chord], startAt, 1.06, 'sine', 0.052);
+    }
+    if (step % 4 === 0) {
+      scheduleMusicTone(context, music.filter, MUSIC_ROOTS[chord] * 2, startAt, 2.05, 'sine', 0.018);
+      scheduleMusicTone(context, music.filter, MUSIC_ROOTS[chord] * 3, startAt, 1.8, 'triangle', 0.012);
+    }
+    music.step += 1;
+  }
+
+  function runMusicScheduler() {
+    const context = contextRef.current;
+    const music = musicRef.current;
+    if (!context || !music || context.state !== 'running' || muteRef.current || disposedRef.current) return;
+    if (music.nextNoteTime < context.currentTime + 0.01) {
+      music.nextNoteTime = context.currentTime + 0.05;
+    }
+    while (music.nextNoteTime < context.currentTime + MUSIC_LOOKAHEAD_SECONDS) {
+      scheduleMusicStep(music.nextNoteTime);
+      music.nextNoteTime += MUSIC_STEP_SECONDS;
+    }
+  }
+
+  function updateMusic() {
+    const context = contextRef.current;
+    const music = musicRef.current;
+    if (!context || !music || context.state === 'closed') return;
+    const now = context.currentTime;
+    const levelByMode: Partial<Record<RideState, number>> = {
+      countdown: 0.08,
+      riding: 0.15,
+      target: 0.13,
+      aiming: 0.1,
+      shot: 0.12,
+      reading: 0.09,
+      summit: 0.17,
+      finale: 0.14,
+    };
+    const level = muteRef.current ? 0.0001 : levelByMode[modeRef.current] ?? 0.0001;
+    music.gain.gain.setTargetAtTime(level, now, 0.28);
+    music.filter.frequency.setTargetAtTime(modeRef.current === 'aiming' ? 1250 : 2350, now, 0.35);
+  }
+
+  function ensureMusic(context: AudioContext) {
+    if (musicRef.current) return;
+    const filter = context.createBiquadFilter();
+    const gain = context.createGain();
+    filter.type = 'lowpass';
+    filter.frequency.value = 2350;
+    filter.Q.value = 0.72;
+    gain.gain.value = 0.0001;
+    filter.connect(gain).connect(getMasterOutput(context));
+    musicRef.current = {
+      gain,
+      filter,
+      step: 0,
+      nextNoteTime: context.currentTime + 0.05,
+      timer: window.setInterval(runMusicScheduler, MUSIC_SCHEDULER_MS),
+    };
+    runMusicScheduler();
+    updateMusic();
+  }
+
+  function activateAudio() {
+    const context = getAudioContext();
+    if (!context) return;
+    const start = () => {
+      if (disposedRef.current || contextRef.current !== context || context.state !== 'running') return;
+      ensureEngine(context);
+      ensureMusic(context);
+      updateMaster();
+      updateEngine(reportedSpeed.current);
+      updateMusic();
+      if (!muteRef.current) runMusicScheduler();
+      setAudioReady(true);
+    };
+    if (context.state === 'running') start();
+    else void resumeAudioContext(context).then(start).catch(() => {
+      if (!disposedRef.current) setAudioReady(false);
+    });
   }
 
   function transition(next: RideState) {
     modeRef.current = next;
     setMode(next);
     updateEngine(reportedSpeed.current);
+    updateMusic();
+  }
+
+  function setMute(value: boolean) {
+    muteRef.current = value;
+    setMuteState(value);
+    if (!value) activateAudio();
+    updateMaster();
+    updateEngine(reportedSpeed.current);
+    updateMusic();
   }
 
   function setAimLocked(value: boolean) {
@@ -543,10 +770,11 @@ function useRideController(): RideController {
   }
 
   function sound(freq: number, duration: number, type: OscillatorType = 'sine', volume = 0.035) {
-    if (muteRef.current || typeof window === 'undefined') return;
+    if (disposedRef.current || muteRef.current || typeof window === 'undefined') return;
     const context = getAudioContext();
     if (!context || context.state === 'closed') return;
-    try {
+    const play = () => {
+      if (disposedRef.current || contextRef.current !== context || muteRef.current || context.state !== 'running') return;
       const osc = context.createOscillator();
       const gain = context.createGain();
       const now = context.currentTime;
@@ -555,12 +783,32 @@ function useRideController(): RideController {
       gain.gain.setValueAtTime(volume, now);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
       osc.connect(gain);
-      gain.connect(context.destination);
+      gain.connect(getMasterOutput(context));
+      osc.onended = () => {
+        osc.disconnect();
+        gain.disconnect();
+      };
       osc.start(now);
       osc.stop(now + duration);
-    } catch {
-      // Audio autoplay policy fallback
-    }
+    };
+    if (context.state === 'running') play();
+    else void resumeAudioContext(context).then(play).catch(() => {
+      // Audio can be retried from the explicit header control.
+    });
+  }
+
+  function queueSound(
+    delay: number,
+    freq: number,
+    duration: number,
+    type: OscillatorType = 'sine',
+    volume = 0.035,
+  ) {
+    const timer = window.setTimeout(() => {
+      soundTimeoutsRef.current.delete(timer);
+      if (!disposedRef.current) sound(freq, duration, type, volume);
+    }, delay);
+    soundTimeoutsRef.current.add(timer);
   }
 
   function killTimelines() {
@@ -608,8 +856,8 @@ function useRideController(): RideController {
   }
 
   function reportVehicleSpeed(value: number) {
-    const next = THREE.MathUtils.clamp(value, 0, 1);
-    updateEngine(next);
+    const next = Math.max(0, value);
+    updateEngine(Math.min(next, 1));
     if (Math.abs(next - reportedSpeed.current) > 0.014 || next === 0) {
       reportedSpeed.current = next;
       setVehicleSpeed(next);
@@ -638,7 +886,7 @@ function useRideController(): RideController {
     setSpeed(0);
     setRideReset((value) => value + 1);
     transition('countdown');
-    ensureEngine();
+    activateAudio();
     sound(140, 0.12, 'square', 0.035);
 
     const timeline = gsap.timeline();
@@ -749,20 +997,19 @@ function useRideController(): RideController {
     setTargetProgress(1);
     sound(980, 0.08, 'sawtooth', 0.09);
     sound(135, 0.26, 'square', 0.095);
-    window.setTimeout(() => sound(540, 0.18, 'sine', 0.04), 90);
+    queueSound(90, 540, 0.18, 'sine', 0.04);
     window.setTimeout(() => {
       transition('reading');
     }, 720);
   }
 
   function continueRide() {
-    if (modeRef.current !== 'reading' && modeRef.current !== 'shot') return;
     if (previewingRef.current) {
       killTimelines();
       previewingRef.current = false;
       setPreviewing(false);
       setPanelIndex(null);
-      transition(returnModeRef.current);
+      if (modeRef.current !== returnModeRef.current) transition(returnModeRef.current);
       setSpeed(returnSpeedRef.current);
       if (returnSpeedRef.current === 0) {
         reportedSpeed.current = 0;
@@ -770,6 +1017,7 @@ function useRideController(): RideController {
       }
       return;
     }
+    if (modeRef.current !== 'reading' && modeRef.current !== 'shot') return;
     killTimelines();
     const currentQueue = targetQueueRef.current;
     if (currentQueue.length === 0) return;
@@ -826,24 +1074,27 @@ function useRideController(): RideController {
   function openSection(index: number) {
     if (index < 0 || index >= PORTFOLIO_STOPS.length) return;
     if (modeRef.current === 'countdown' || modeRef.current === 'shot') return;
-    if (modeRef.current === 'reading') {
-      if (!previewingRef.current) return;
+    activateAudio();
+    if (previewingRef.current && (modeRef.current === 'reading' || modeRef.current === 'finale')) {
       setPanelIndex(index);
       return;
     }
+    if (modeRef.current === 'reading') return;
     killTimelines();
-    returnModeRef.current = modeRef.current;
-    returnSpeedRef.current = modeRef.current === 'intro' || modeRef.current === 'finale' ? 0 : 1;
+    const sourceMode = modeRef.current;
+    returnModeRef.current = sourceMode;
+    returnSpeedRef.current = sourceMode === 'intro' || sourceMode === 'finale' ? 0 : 1;
     previewingRef.current = true;
     setPreviewing(true);
     setPanelIndex(index);
     setAimLocked(false);
     setTargetVulnerable(false);
-    transition('reading');
+    if (sourceMode !== 'finale') transition('reading');
     setSpeed(returnSpeedRef.current === 0 ? 0 : 0.2);
   }
 
   function openFinale() {
+    activateAudio();
     killTimelines();
     previewingRef.current = false;
     setPreviewing(false);
@@ -855,7 +1106,7 @@ function useRideController(): RideController {
     setVehicleSpeed(0);
     transition('finale');
     sound(196, 0.8, 'sine', 0.045);
-    window.setTimeout(() => sound(392, 1.1, 'sine', 0.03), 260);
+    queueSound(260, 392, 1.1, 'sine', 0.03);
   }
 
   function reachFinale() {
@@ -866,12 +1117,14 @@ function useRideController(): RideController {
     setVehicleSpeed(0);
     transition('finale');
     sound(196, 0.8, 'sine', 0.045);
-    window.setTimeout(() => sound(392, 1.1, 'sine', 0.03), 260);
+    queueSound(260, 392, 1.1, 'sine', 0.03);
   }
 
   useEffect(() => {
     muteRef.current = mute;
+    updateMaster();
     updateEngine(reportedSpeed.current);
+    updateMusic();
   }, [mute]);
 
   useEffect(() => {
@@ -890,19 +1143,31 @@ function useRideController(): RideController {
   }, []);
 
   useEffect(() => {
+    disposedRef.current = false;
     return () => {
+      disposedRef.current = true;
       mainTimeline.current?.kill();
+      soundTimeoutsRef.current.forEach((timer) => window.clearTimeout(timer));
+      soundTimeoutsRef.current.clear();
       const engine = engineRef.current;
       if (engine) {
-        try {
-          engine.low.stop();
-          engine.high.stop();
-        } catch {
-          // Audio context may already be closed during fast refresh.
-        }
+        [engine.low, engine.mid, engine.high].forEach((oscillator) => {
+          try {
+            oscillator.stop();
+          } catch {
+            // A source may already be stopped during Strict Mode or fast refresh.
+          }
+        });
       }
       engineRef.current = null;
-      if (contextRef.current && contextRef.current.state !== 'closed') void contextRef.current.close();
+      if (musicRef.current) window.clearInterval(musicRef.current.timer);
+      musicRef.current = null;
+      masterRef.current = null;
+      limiterRef.current = null;
+      resumePromiseRef.current = null;
+      const context = contextRef.current;
+      contextRef.current = null;
+      if (context && context.state !== 'closed') void context.close().catch(() => undefined);
     };
   }, []);
 
@@ -920,6 +1185,7 @@ function useRideController(): RideController {
     setAimLocked,
     setTargetVulnerable,
     mute,
+    audioReady,
     setMute,
     mode,
     countdown,
@@ -2182,6 +2448,9 @@ function RideRig({
       runtime.lane = 0;
       runtime.steer = 0;
       runtime.wheelAngle = 0;
+      runtime.touchSteer = 0;
+      runtime.touchThrottle = false;
+      runtime.touchBrake = false;
       runtime.gestureThrottle = 0;
       runtime.targetHit = false;
       runtime.telemetryElapsed = 0;
@@ -2203,6 +2472,9 @@ function RideRig({
       runtime.acceleration = 0;
       runtime.lane = 0;
       runtime.steer = 0;
+      runtime.touchSteer = 0;
+      runtime.touchThrottle = false;
+      runtime.touchBrake = false;
       runtime.targetHit = false;
       runtime.hasLastPosition = false;
       runtime.stageApplied = controller.activeIndex;
@@ -2229,12 +2501,13 @@ function RideRig({
 
     const keyboardSteer = controlMode ? (runtime.right ? 1 : 0) - (runtime.left ? 1 : 0) : 0;
     const pointerSteer = controller.mode === 'riding' || controller.mode === 'summit' ? runtime.pointerX * 0.72 : 0;
-    const desiredSteer = THREE.MathUtils.clamp(keyboardSteer + pointerSteer, -1, 1);
+    const touchSteer = controlMode ? runtime.touchSteer : 0;
+    const desiredSteer = THREE.MathUtils.clamp(keyboardSteer + pointerSteer + touchSteer, -1, 1);
     runtime.steer = THREE.MathUtils.damp(runtime.steer, desiredSteer, 9.5, delta);
 
     runtime.gestureThrottle = THREE.MathUtils.damp(runtime.gestureThrottle, 0, 2.8, delta);
-    const heldThrottle = controlMode && (runtime.forward || runtime.mouseThrottle) ? 1 : 0;
-    const braking = controlMode && (runtime.brake || runtime.gestureThrottle < -0.08);
+    const heldThrottle = controlMode && (runtime.forward || runtime.mouseThrottle || runtime.touchThrottle) ? 1 : 0;
+    const braking = controlMode && (runtime.brake || runtime.touchBrake || runtime.gestureThrottle < -0.08);
     const throttle = Math.max(heldThrottle, controlMode ? Math.max(0, runtime.gestureThrottle) : 0);
     let desiredVelocity = movingMode ? CRUISE_SPEED + (1 - CRUISE_SPEED) * throttle : 0;
 
@@ -2245,7 +2518,9 @@ function RideRig({
     const summitRemaining = SUMMIT_DISTANCE - currentDistance;
     let terminalBraking = false;
     if (controller.mode === 'summit') {
-      desiredVelocity = Math.max(0.52, CRUISE_SPEED + (1 - CRUISE_SPEED) * throttle);
+      const allTargetsHit = controller.completedCount === PORTFOLIO_STOPS.length;
+      const maxVelocity = allTargetsHit ? 1.43 : 1;
+      desiredVelocity = Math.max(0.52, Math.min(CRUISE_SPEED + (maxVelocity - CRUISE_SPEED) * throttle, maxVelocity));
       if (summitRemaining < 18) {
         const summitLimit = THREE.MathUtils.lerp(0.12, 0.58, THREE.MathUtils.clamp(summitRemaining / 18, 0, 1));
         desiredVelocity = Math.min(desiredVelocity, summitLimit);
@@ -2259,7 +2534,7 @@ function RideRig({
 
     const previousVelocity = runtime.velocity;
     const velocityDelta = desiredVelocity - runtime.velocity;
-    const accelerationRate = THREE.MathUtils.lerp(0.78, 0.42, runtime.velocity);
+    const accelerationRate = THREE.MathUtils.lerp(0.78, 0.42, Math.min(runtime.velocity, 1));
     const decelerationRate = braking || terminalBraking
       ? 2.2
       : controller.mode === 'aiming'
@@ -2282,7 +2557,7 @@ function RideRig({
     const timeScale = movingMode ? controller.speed : 0;
     let laneVelocity = 0;
     if (movingMode) {
-      const lateralSpeed = runtime.velocity * THREE.MathUtils.lerp(2.2, 4.2, runtime.velocity);
+      const lateralSpeed = Math.min(runtime.velocity, 1) * THREE.MathUtils.lerp(2.2, 4.2, Math.min(runtime.velocity, 1));
       laneVelocity = runtime.steer * lateralSpeed * timeScale;
       runtime.lane = THREE.MathUtils.clamp(
         runtime.lane + laneVelocity * delta,
@@ -2897,7 +3172,7 @@ function SectionPanel({ controller }: { controller: RideController }) {
   const portfolioStop = controller.panelStop;
   if (!portfolioStop) return null;
   const actionLabel = controller.previewing
-    ? controller.previewReturnMode === 'finale' ? 'RETURN TO SUMMIT' : 'RETURN TO RIDE'
+    ? controller.previewReturnMode === 'finale' ? 'CLOSE DETAILS' : 'RETURN TO RIDE'
     : portfolioStop.id === 'contact'
       ? 'RIDE TO SUMMIT'
       : 'CONTINUE RIDE';
@@ -2913,7 +3188,7 @@ function SectionPanel({ controller }: { controller: RideController }) {
     <div className="skills-heading">
       <p>{portfolioStop.number} / {controller.previewing ? 'DIRECT ACCESS' : portfolioStop.eyebrow}</p>
       <h2 id={'section-' + portfolioStop.id}>{portfolioStop.heading[0]}<br /><em>{portfolioStop.heading[1]}</em></h2>
-      <span>{controller.previewing ? 'Quick view - route progress is unchanged' : 'World speed reduced to 20%'}</span>
+      <span>{controller.previewing ? 'Quick view - route progress is unchanged' : 'GOING THROUGH THE RIDE'}</span>
       <p className="section-note">{portfolioStop.note}</p>
     </div>
     <div className={'skills-columns group-count-' + portfolioStop.groups.length}>
@@ -2935,8 +3210,169 @@ function SectionPanel({ controller }: { controller: RideController }) {
   </motion.section>;
 }
 
+type TouchPoint = { active: boolean; x: number; y: number; braking: boolean };
+
+const IDLE_TOUCH: TouchPoint = { active: false, x: 0, y: 0, braking: false };
+
+function getCircularTouchPoint(event: ReactPointerEvent<HTMLButtonElement>) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const radius = Math.max(1, rect.width * 0.31);
+  let x = event.clientX - (rect.left + rect.width / 2);
+  let y = event.clientY - (rect.top + rect.height / 2);
+  const distance = Math.hypot(x, y);
+  if (distance > radius) {
+    const scale = radius / distance;
+    x *= scale;
+    y *= scale;
+  }
+  return { x: x / radius, y: y / radius };
+}
+
+function TouchDriveControls({ drive }: { drive: DriveRef }) {
+  const [steeringTouch, setSteeringTouch] = useState<TouchPoint>(IDLE_TOUCH);
+  const [throttleTouch, setThrottleTouch] = useState<TouchPoint>(IDLE_TOUCH);
+  const steeringPointer = useRef<number | null>(null);
+  const throttlePointer = useRef<number | null>(null);
+  const throttleOriginY = useRef<number | null>(null);
+
+  const updateSteering = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (steeringPointer.current !== event.pointerId) return;
+    const point = getCircularTouchPoint(event);
+    const magnitude = Math.abs(point.x);
+    const steer = magnitude < 0.08
+      ? 0
+      : Math.sign(point.x) * ((magnitude - 0.08) / 0.92);
+    drive.current.touchSteer = THREE.MathUtils.clamp(steer, -1, 1);
+    setSteeringTouch({ active: true, ...point, braking: false });
+  };
+
+  const startSteering = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    steeringPointer.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updateSteering(event);
+  };
+
+  const releaseSteering = (event?: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event && steeringPointer.current !== event.pointerId) return;
+    steeringPointer.current = null;
+    drive.current.touchSteer = 0;
+    setSteeringTouch(IDLE_TOUCH);
+  };
+
+  const updateThrottle = (event: ReactPointerEvent<HTMLButtonElement>, allowBrake = true) => {
+    if (throttlePointer.current !== event.pointerId) return;
+    const point = getCircularTouchPoint(event);
+    const rect = event.currentTarget.getBoundingClientRect();
+    const dragDistance = event.clientY - (throttleOriginY.current ?? event.clientY);
+    const braking = allowBrake && dragDistance > rect.height * 0.22;
+    drive.current.touchThrottle = !braking;
+    drive.current.touchBrake = braking;
+    setThrottleTouch({ active: true, ...point, braking });
+  };
+
+  const startThrottle = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    throttlePointer.current = event.pointerId;
+    throttleOriginY.current = event.clientY;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updateThrottle(event, false);
+  };
+
+  const releaseThrottle = (event?: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event && throttlePointer.current !== event.pointerId) return;
+    throttlePointer.current = null;
+    throttleOriginY.current = null;
+    drive.current.touchThrottle = false;
+    drive.current.touchBrake = false;
+    setThrottleTouch(IDLE_TOUCH);
+  };
+
+  useEffect(() => {
+    const resetControls = () => {
+      steeringPointer.current = null;
+      throttlePointer.current = null;
+      throttleOriginY.current = null;
+      drive.current.touchSteer = 0;
+      drive.current.touchThrottle = false;
+      drive.current.touchBrake = false;
+      setSteeringTouch(IDLE_TOUCH);
+      setThrottleTouch(IDLE_TOUCH);
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) resetControls();
+    };
+    window.addEventListener('blur', resetControls);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('blur', resetControls);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      drive.current.touchSteer = 0;
+      drive.current.touchThrottle = false;
+      drive.current.touchBrake = false;
+    };
+  }, [drive]);
+
+  const steeringStyle = {
+    '--touch-x': `${steeringTouch.x * 31}px`,
+    '--touch-y': `${steeringTouch.y * 31}px`,
+  } as CSSProperties;
+  const throttleStyle = {
+    '--touch-x': `${throttleTouch.x * 25}px`,
+    '--touch-y': `${throttleTouch.y * 25}px`,
+  } as CSSProperties;
+
+  return <div className="mobile-touch-controls" aria-label="Touch motorcycle controls">
+    <div className="touch-control-group touch-navigation">
+      <span>NAVIGATION</span>
+      <button
+        className={'touch-control-ring' + (steeringTouch.active ? ' is-active' : '')}
+        style={steeringStyle}
+        type="button"
+        aria-label="Drag the navigation circle left or right to steer"
+        aria-pressed={steeringTouch.active}
+        onPointerDown={startSteering}
+        onPointerMove={updateSteering}
+        onPointerUp={releaseSteering}
+        onPointerCancel={releaseSteering}
+        onLostPointerCapture={releaseSteering}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        <i className="touch-control-guide" aria-hidden="true" />
+        <b className="touch-control-thumb"><em>DRAG</em></b>
+        <small>LEFT / RIGHT</small>
+      </button>
+    </div>
+
+    <div className="touch-control-group touch-acceleration">
+      <span>{throttleTouch.braking ? 'BRAKING' : 'ACCELERATION'}</span>
+      <button
+        className={'touch-control-ring touch-throttle' + (throttleTouch.active ? ' is-active' : '') + (throttleTouch.braking ? ' is-braking' : '')}
+        style={throttleStyle}
+        type="button"
+        aria-label="Hold the acceleration circle to speed up; drag down to brake"
+        aria-pressed={throttleTouch.active}
+        onPointerDown={startThrottle}
+        onPointerMove={updateThrottle}
+        onPointerUp={releaseThrottle}
+        onPointerCancel={releaseThrottle}
+        onLostPointerCapture={releaseThrottle}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        <i className="touch-control-guide" aria-hidden="true" />
+        <b className="touch-control-thumb"><em>{throttleTouch.braking ? 'BRAKE' : throttleTouch.active ? 'GO' : 'HOLD'}</em></b>
+        <small>{throttleTouch.braking ? 'RELEASE TO COAST' : 'PULL DOWN / BRAKE'}</small>
+      </button>
+    </div>
+  </div>;
+}
+
 function Hud({ controller, drive }: { controller: RideController; drive: DriveRef }) {
-  const { mode, countdown, vehicleSpeed, targetDistance, misses, aimLocked, targetVulnerable, mute, setMute, activeStop, begin, shoot } = controller;
+  const { mode, countdown, vehicleSpeed, targetDistance, misses, aimLocked, targetVulnerable, mute, audioReady, setMute, activeStop, begin, shoot } = controller;
   const [menuOpen, setMenuOpen] = useState(false);
   const [showFinale, setShowFinale] = useState(false);
 
@@ -2965,6 +3401,20 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
       : activeStop?.label ?? 'SUMMIT';
   const routeNumber = mode === 'finale' || mode === 'summit' ? '06' : activeStop?.number ?? '06';
   const journeyComplete = controller.completedCount === PORTFOLIO_STOPS.length;
+  const desktopInstruction = mode === 'riding'
+    ? 'FULL THROTTLE W / UP ARROW / HOLD MOUSE / A D TO LEAN / S TO BRAKE'
+    : mode === 'target'
+      ? 'TARGET AHEAD / MAINTAIN SPEED / SLOW-MO AT CLOSE RANGE'
+      : mode === 'aiming'
+        ? 'TRACK THE MOVING CORE / GOLD = FIRE / RED = WAIT'
+        : 'FINAL ASCENT / REACH THE OVERLOOK TO COMPLETE THE JOURNEY';
+  const touchInstruction = mode === 'riding'
+    ? 'DRAG LEFT CIRCLE TO STEER / HOLD RIGHT CIRCLE TO ACCELERATE'
+    : mode === 'target'
+      ? 'KEEP HOLDING ACCELERATE / TARGET AHEAD'
+      : mode === 'aiming'
+        ? 'TAP FIRE WHEN GOLD / DRAG LEFT TO STAY ON LINE'
+        : 'HOLD ACCELERATE / DRAG LEFT TO REACH THE OVERLOOK';
 
   const restartJourney = () => {
     setMenuOpen(false);
@@ -2980,7 +3430,19 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
     <header className="ride-header">
       <button className="ride-mark" type="button" onClick={() => window.location.reload()} aria-label="Restart experience"><span>AR</span><i>APOORVA RAWAT</i></button>
       <div className="header-actions">
-        <button className="sound-button" type="button" onClick={() => setMute(!mute)} aria-label={mute ? 'Enable sound' : 'Mute sound'}>{mute ? 'SOUND OFF' : 'SOUND ON'}</button>
+        <button
+          className={'sound-button' + (mute ? ' is-muted' : !audioReady ? ' is-pending' : '')}
+          type="button"
+          onClick={() => {
+            if (!audioReady) setMute(false);
+            else setMute(!mute);
+          }}
+          aria-label={!audioReady ? 'Enable background music and bike engine' : mute ? 'Turn on background music and bike engine' : 'Mute background music and bike engine'}
+          aria-pressed={audioReady && !mute}
+          title="Background music and bike engine"
+        >
+          {mute ? 'AUDIO OFF' : audioReady ? 'AUDIO ON' : 'AUDIO READY'} <span aria-hidden="true">{audioReady && !mute ? '●' : '○'}</span>
+        </button>
         <button className="menu-button-3d" type="button" onClick={() => setMenuOpen((value) => !value)} aria-expanded={menuOpen}>MENU <b>+</b></button>
       </div>
     </header>
@@ -2990,31 +3452,36 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
       {PORTFOLIO_STOPS.map((portfolioStop, index) => {
         const complete = controller.completedStops.includes(index);
         const active = index === controller.activeIndex && mode !== 'summit' && mode !== 'finale';
-        const selected = mode === 'reading' && controller.previewing && controller.panelStop?.id === portfolioStop.id;
+        const selected = controller.previewing && controller.panelStop?.id === portfolioStop.id;
+        const rideInProgress = mode !== 'finale' && mode !== 'intro';
+        const disabled = rideInProgress && !active && !selected;
         return <button
           key={portfolioStop.id}
-          className={[complete && 'is-complete', (active || selected) && 'is-active'].filter(Boolean).join(' ')}
+          className={[complete && 'is-complete', (active || selected) && 'is-active', disabled && 'is-disabled'].filter(Boolean).join(' ')}
           type="button"
           aria-current={selected ? 'page' : undefined}
+          disabled={disabled}
           onClick={() => {
+            if (disabled) return;
             setMenuOpen(false);
             controller.openSection(index);
           }}
         >
           <span>{portfolioStop.number} / {portfolioStop.label}</span>
-          <i className="route-menu-status">{selected ? 'VIEWING' : complete ? 'UNLOCKED' : active ? 'ON ROUTE' : 'QUICK VIEW'}</i>
+          <i className="route-menu-status">{selected ? 'VIEWING' : complete ? (mode === 'finale' ? 'VIEW DETAILS' : 'UNLOCKED') : active ? 'ON ROUTE' : rideInProgress ? 'LOCKED' : 'VIEW DETAILS'}</i>
         </button>;
       })}
       <button
-        className={mode === 'finale' ? 'is-active' : ''}
+        className={mode === 'finale' && !controller.previewing ? 'is-active' : ''}
         type="button"
+        disabled={mode !== 'finale' && mode !== 'intro'}
         onClick={() => {
           setMenuOpen(false);
           controller.openFinale();
         }}
       >
         <span>★ / SUMMIT FINALE</span>
-        <i className="route-menu-status">{mode === 'finale' ? 'ACTIVE' : 'PLAY FINALE'}</i>
+        <i className="route-menu-status">{mode === 'finale' ? (controller.previewing ? 'BACK TO SUMMIT' : 'ACTIVE') : 'PLAY FINALE'}</i>
       </button>
       <button className="route-menu-restart" type="button" onClick={restartJourney}>
         <span>↺ / RESTART JOURNEY</span>
@@ -3037,6 +3504,8 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
         <button className="drive-right" type="button" aria-label="Steer right" onPointerDown={(event) => { event.preventDefault(); hold('right', true); }} onPointerUp={() => hold('right', false)} onPointerCancel={() => hold('right', false)} onPointerLeave={() => hold('right', false)}>→<i>D</i></button>
       </div>
 
+      <TouchDriveControls drive={drive} />
+
       {(mode === 'target' || mode === 'aiming') && <div className="fire-pad" aria-label="Fire weapon at target">
         <button
           className={'fire-trigger-btn' + (targetVulnerable ? ' is-vulnerable' : '')}
@@ -3052,10 +3521,10 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
 
     <AnimatePresence>
       {mode === 'intro' && <motion.section className="entry-screen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-        <p>APOORVA RAWAT / INTERACTIVE PORTFOLIO</p>
-        <h1>RIDE INTO<br /><em>WHAT'S NEXT.</em></h1>
-        <div><span>Six targets. One high-speed Himalayan ascent.</span><button type="button" onClick={begin}>ENTER EXPERIENCE <b>↗</b></button></div>
-        <small>HOLD W / ↑ FOR FULL THROTTLE / A D TO STEER / S TO BRAKE</small>
+        <p>APOORVA RAWAT PORTFOLIO</p>
+        <h1>RIDE<br /><em>WHAT'S NEXT.</em></h1>
+        <div><span>Six targets. One high-speed Himalayan ascent.</span><button type="button" onClick={begin}>TAKE THE RIDE <b>↗</b></button></div>
+        <small>AUDIO STARTS ON ENTRY / HOLD W / ↑ FOR FULL THROTTLE / A D TO STEER / S TO BRAKE</small>
       </motion.section>}
 
       {mode === 'countdown' && <motion.section className="countdown-overlay" key={countdown} initial={{ opacity: 0, scale: 0.78, filter: 'blur(14px)' }} animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }} exit={{ opacity: 0, scale: 1.14, filter: 'blur(8px)' }} transition={{ duration: 0.16 }}>
@@ -3065,7 +3534,7 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
       </motion.section>}
 
       {activeStop && (mode === 'target' || mode === 'aiming' || mode === 'shot') && <motion.section
-        className={'target-readout' + (targetVulnerable ? ' is-open' : '') + (targetVulnerable && aimLocked ? ' is-locked' : '')}
+        className={'target-readout' + (targetVulnerable ? ' is-open' : '') + (aimLocked ? ' is-locked' : '')}
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0 }}
@@ -3085,11 +3554,11 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
         {mode === 'aiming' && misses >= 2 && <small className="aim-assist">AIM CALIBRATED</small>}
       </motion.section>}
 
-      {mode === 'reading' && <SectionPanel key={controller.panelStop?.id ?? 'section'} controller={controller} />}
+      {(mode === 'reading' || (mode === 'finale' && controller.previewing)) && <SectionPanel key={controller.panelStop?.id ?? 'section'} controller={controller} />}
 
-      {mode === 'finale' && !showFinale && <motion.p className="finale-sequence" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>KICKSTAND DOWN / SUMMIT VIEW</motion.p>}
+      {mode === 'finale' && !controller.previewing && !showFinale && <motion.p className="finale-sequence" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>KICKSTAND DOWN / SUMMIT VIEW</motion.p>}
 
-      {mode === 'finale' && showFinale && <motion.section
+      {mode === 'finale' && !controller.previewing && showFinale && <motion.section
         className="finale-overlay"
         initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
@@ -3098,9 +3567,9 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
         aria-labelledby="finale-title"
       >
         <p className="finale-kicker">{journeyComplete ? 'JOURNEY COMPLETE / ' + PORTFOLIO_STOPS.length + ' CHECKPOINTS' : 'SUMMIT PREVIEW / DIRECT ACCESS'}</p>
-        <h2 id="finale-title">THE SUMMIT.<br /><em>YOUR NEXT MOVE.</em></h2>
+        <h2 id="finale-title">JUST THE END.<br /><em>RIDE STILL GOING ON.</em></h2>
         <p className="finale-copy">{journeyComplete
-          ? 'Every portfolio card is unlocked. Open the menu and choose any card to revisit it; the detail panel will update to match each selection.'
+          ? 'Every portfolio card is unlocked. Open the menu and choose any card to revisit it.'
           : 'Explore any portfolio card from the menu, or restart the journey and unlock every checkpoint on the road.'}</p>
         <div className="finale-actions">
           <button className="finale-menu-action" type="button" onClick={() => setMenuOpen(true)}>EXPLORE CARDS <b>+</b></button>
@@ -3110,7 +3579,7 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
     </AnimatePresence>
 
     {(mode === 'target' || mode === 'aiming') && <div className={'crosshair-3d' + (targetVulnerable && aimLocked ? ' is-hot' : '')} aria-hidden="true"><i /></div>}
-    {driving && <p className="ride-instruction">{mode === 'riding'
+    {driving && <p className="ride-instruction" aria-label={desktopInstruction} data-touch-instruction={touchInstruction}>{mode === 'riding'
       ? 'FULL THROTTLE W / ↑ / HOLD MOUSE / A D TO LEAN / S TO BRAKE'
       : mode === 'target'
         ? 'TARGET AHEAD / MAINTAIN SPEED / SLOW-MO AT CLOSE RANGE'
@@ -3155,6 +3624,9 @@ export default function CinematicRide() {
       drive.current.brake = false;
       drive.current.left = false;
       drive.current.right = false;
+      drive.current.touchSteer = 0;
+      drive.current.touchThrottle = false;
+      drive.current.touchBrake = false;
       drive.current.gestureThrottle = 0;
       releasePointer();
     };

@@ -29,6 +29,7 @@ type RideController = {
   begin: () => void;
   shoot: (confirmed?: boolean) => void;
   continueRide: () => void;
+  restartCheckpoint: () => void;
   openSection: (index: number) => void;
   reportApproach: (stageIndex: number, value: number, distance: number) => void;
   reportVehicleSpeed: (value: number) => void;
@@ -49,6 +50,7 @@ type RideController = {
   missPulse: number;
   missMessage: string;
   rideReset: number;
+  checkpointReset: number;
   activeIndex: number;
   completedCount: number;
   activeStop: PortfolioStop | null;
@@ -74,6 +76,7 @@ type DriveRuntime = {
   targetHit: boolean;
   resetApplied: number;
   stageApplied: number;
+  checkpointResetApplied: number;
   summitReported: boolean;
   telemetryElapsed: number;
   lastPosition: THREE.Vector3;
@@ -107,6 +110,7 @@ roadCurve.curveType = 'centripetal';
 const ROAD_LENGTH = roadCurve.getLength();
 const RIDE_START_PROGRESS = RIDE_START_DISTANCE / ROAD_LENGTH;
 const SUMMIT_PROGRESS = SUMMIT_DISTANCE / ROAD_LENGTH;
+const ROAD_END_PROGRESS = Math.min(1, SUMMIT_PROGRESS + 5 / ROAD_LENGTH);
 
 const stop = (
   id: SectionId,
@@ -184,6 +188,7 @@ function createDriveRuntime(): DriveRuntime {
     targetHit: false,
     resetApplied: -1,
     stageApplied: -1,
+    checkpointResetApplied: -1,
     summitReported: false,
     telemetryElapsed: 0,
     lastPosition: new THREE.Vector3(),
@@ -247,7 +252,7 @@ function getRoadsidePose(portfolioStop: PortfolioStop) {
   const tangent = roadCurve.getTangentAt(portfolioStop.progress).normalize();
   const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
   const position = point.clone().addScaledVector(side, portfolioStop.side * 4.35);
-  position.y += 1.62;
+  position.y += 2.05;
   return {
     position,
     tangent,
@@ -270,6 +275,7 @@ function useRideController(): RideController {
   const [missPulse, setMissPulse] = useState(0);
   const [missMessage, setMissMessage] = useState('');
   const [rideReset, setRideReset] = useState(0);
+  const [checkpointReset, setCheckpointReset] = useState(0);
   const [mute, setMute] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [panelIndex, setPanelIndex] = useState<number | null>(null);
@@ -566,6 +572,17 @@ function useRideController(): RideController {
     sound(nextIndex < PORTFOLIO_STOPS.length ? 105 : 132, 0.4, 'sawtooth', 0.052);
   }
 
+  function restartCheckpoint() {
+    if (activeIndexRef.current >= PORTFOLIO_STOPS.length) return;
+    if (modeRef.current !== 'target' && modeRef.current !== 'aiming') return;
+    killTimelines();
+    resetChallenge(30);
+    setCheckpointReset((value) => value + 1);
+    transition('target');
+    setSpeed(1);
+    sound(240, 0.24, 'square', 0.04);
+  }
+
   function openSection(index: number) {
     if (index < 0 || index >= PORTFOLIO_STOPS.length) return;
     if (modeRef.current === 'countdown' || modeRef.current === 'shot' || modeRef.current === 'reading') return;
@@ -633,6 +650,7 @@ function useRideController(): RideController {
     begin,
     shoot,
     continueRide,
+    restartCheckpoint,
     openSection,
     reportApproach,
     reportVehicleSpeed,
@@ -653,6 +671,7 @@ function useRideController(): RideController {
     missPulse,
     missMessage,
     rideReset,
+    checkpointReset,
     activeIndex,
     completedCount: Math.min(activeIndex, PORTFOLIO_STOPS.length),
     activeStop: PORTFOLIO_STOPS[activeIndex] ?? null,
@@ -662,10 +681,10 @@ function useRideController(): RideController {
 }
 
 function Road() {
-  const road = useMemo(() => createRoadGeometry(5.2, 0.08, 0, 1, true), []);
-  const shoulder = useMemo(() => createRoadGeometry(7.2, 0.035, 0, 1, true), []);
+  const road = useMemo(() => createRoadGeometry(5.2, 0.12, 0, ROAD_END_PROGRESS, true), []);
+  const shoulder = useMemo(() => createRoadGeometry(7.2, 0.09, 0, ROAD_END_PROGRESS, true), []);
   const localZ = useMemo(() => new THREE.Vector3(0, 0, 1), []);
-  const lines = useMemo(() => Array.from({ length: Math.floor(ROAD_LENGTH / 7) }, (_, index) => {
+  const lines = useMemo(() => Array.from({ length: Math.floor((ROAD_LENGTH * ROAD_END_PROGRESS) / 7) }, (_, index) => {
     const distance = index * 7 + 4;
     const progress = THREE.MathUtils.clamp(distance / ROAD_LENGTH, 0, 1);
     const point = roadCurve.getPointAt(progress);
@@ -677,7 +696,7 @@ function Road() {
   }), [localZ]);
   const rails = useMemo(() => ([-1, 1] as const).map((railSide) => {
     const points = Array.from({ length: 170 }, (_, index) => {
-      const progress = index / 169;
+      const progress = (index / 169) * ROAD_END_PROGRESS;
       const point = roadCurve.getPointAt(progress);
       const tangent = roadCurve.getTangentAt(progress).normalize();
       const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
@@ -688,7 +707,7 @@ function Road() {
   }), []);
   const posts = useMemo(() => {
     const result: Array<{ position: THREE.Vector3; key: string }> = [];
-    for (let distance = 10; distance < ROAD_LENGTH - 10; distance += 11) {
+    for (let distance = 10; distance < ROAD_LENGTH * ROAD_END_PROGRESS - 10; distance += 11) {
       if (PORTFOLIO_STOPS.some((item) => Math.abs(item.distance - distance) < 5)) continue;
       const progress = distance / ROAD_LENGTH;
       const point = roadCurve.getPointAt(progress);
@@ -705,8 +724,8 @@ function Road() {
   }, []);
 
   return <group>
-    <mesh geometry={shoulder} receiveShadow><meshStandardMaterial color="#38424a" roughness={0.93} /></mesh>
-    <mesh geometry={road} receiveShadow><meshStandardMaterial color="#171b20" roughness={0.82} metalness={0.03} /></mesh>
+    <mesh geometry={shoulder} receiveShadow><meshStandardMaterial color="#24272a" roughness={0.9} polygonOffset polygonOffsetFactor={1} polygonOffsetUnits={1} /></mesh>
+    <mesh geometry={road} receiveShadow><meshStandardMaterial color="#24272a" roughness={0.86} metalness={0.02} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} /></mesh>
     {lines.map(({ point, quaternion }, index) => <mesh key={index} position={[point.x, point.y + 0.105, point.z]} quaternion={quaternion} receiveShadow>
       <boxGeometry args={[0.16, 0.016, 2.35]} /><meshStandardMaterial color="#e6c888" emissive="#64461e" emissiveIntensity={0.14} roughness={0.6} />
     </mesh>)}
@@ -870,6 +889,31 @@ function SummitVista() {
 const BIKE_SCALE = 1.28;
 const WHEEL_RADIUS_WORLD = 0.495 * BIKE_SCALE;
 
+const STANDING_RIDER_POSITIONS: Record<string, [number, number, number]> = {
+  'Rider hips': [-0.38, 1.38, 0],
+  'Rider torso jacket': [-0.32, 1.78, 0],
+  'Shoulder left': [-0.28, 1.98, 0.25],
+  'Shoulder right': [-0.28, 1.98, -0.25],
+  'Rider neck': [-0.23, 2.13, 0],
+  'Jacket arm': [-0.28, 1.68, 0.31],
+  'Gloved forearm': [-0.28, 1.28, 0.32],
+  'Glove': [-0.24, 1.02, 0.32],
+  'Jacket arm.001': [-0.28, 1.68, -0.31],
+  'Gloved forearm.001': [-0.28, 1.28, -0.32],
+  'Glove.001': [-0.24, 1.02, -0.32],
+  'Riding thigh': [-0.36, 1.03, 0.18],
+  'Riding shin': [-0.35, 0.57, 0.18],
+  'Riding boot': [-0.24, 0.18, 0.18],
+  'Riding thigh.001': [-0.36, 1.03, -0.18],
+  'Riding shin.001': [-0.35, 0.57, -0.18],
+  'Riding boot.001': [-0.24, 0.18, -0.18],
+  'Rider scarf': [-0.36, 2.12, 0],
+};
+const STRAIGHTEN_RIDER_PARTS = new Set([
+  'Jacket arm', 'Gloved forearm', 'Glove', 'Jacket arm.001', 'Gloved forearm.001', 'Glove.001',
+  'Riding thigh', 'Riding shin', 'Riding boot', 'Riding thigh.001', 'Riding shin.001', 'Riding boot.001',
+]);
+
 function RideRig({ controller, drive }: { controller: RideController; drive: DriveRef }) {
   const { scene } = useGLTF('/models/apoorva-cafe-rider.glb');
   const { camera } = useThree();
@@ -896,8 +940,16 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
   const summitPoint = useMemo(() => roadCurve.getPointAt(SUMMIT_PROGRESS), []);
   const summitTangent = useMemo(() => roadCurve.getTangentAt(SUMMIT_PROGRESS).normalize(), []);
   const summitSide = useMemo(() => new THREE.Vector3(-summitTangent.z, 0, summitTangent.x).normalize(), [summitTangent]);
+  const finaleStartedAt = useRef(-1);
+  const previousRideMode = useRef<RideState>('intro');
+  const riderTarget = useMemo(() => new THREE.Vector3(), []);
+  const identityQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const finalCameraClose = useMemo(() => new THREE.Vector3(), []);
+  const finalCameraWide = useMemo(() => new THREE.Vector3(), []);
+  const finalLookClose = useMemo(() => new THREE.Vector3(), []);
+  const finalLookWide = useMemo(() => new THREE.Vector3(), []);
 
-  const { model, floorOffset } = useMemo(() => {
+  const { model, floorOffset, riderGroup, helmetGroup, helmetBase, headReveal, riderOriginals } = useMemo(() => {
     const clone = scene.clone(true);
     clone.traverse((object) => {
       if (object instanceof THREE.Mesh) {
@@ -905,6 +957,7 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
         object.receiveShadow = true;
       }
     });
+
     for (const name of ['RearWheelSpin', 'FrontWheelSpin']) {
       const pivot = clone.getObjectByName(name);
       if (!pivot) continue;
@@ -918,10 +971,75 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
         }
       }
     }
+
+    const riderNames = [
+      'Rider hips', 'Rider torso jacket', 'Shoulder left', 'Shoulder right', 'Rider neck',
+      'Jacket arm', 'Gloved forearm', 'Glove', 'Jacket arm.001', 'Gloved forearm.001', 'Glove.001',
+      'Riding thigh', 'Riding shin', 'Riding boot', 'Riding thigh.001', 'Riding shin.001', 'Riding boot.001',
+      'Rider scarf',
+    ];
+    const helmetNames = ['Rider helmet', 'Helmet crown', 'Helmet visor', 'Helmet rear'];
+    const riderGroup = new THREE.Group();
+    riderGroup.name = 'RiderDismount';
+    const helmetGroup = new THREE.Group();
+    helmetGroup.name = 'HelmetRemoval';
+    helmetGroup.position.set(0.09, 2.25, 0);
+    const helmetBase = helmetGroup.position.clone();
+    clone.add(riderGroup);
+    clone.updateMatrixWorld(true);
+
+    for (const name of riderNames) {
+      const object = clone.getObjectByName(name);
+      if (object) riderGroup.attach(object);
+    }
+    riderGroup.add(helmetGroup);
+    clone.updateMatrixWorld(true);
+    for (const name of helmetNames) {
+      const object = clone.getObjectByName(name);
+      if (object) helmetGroup.attach(object);
+    }
+
+    const riderParts = riderNames
+      .map((name) => riderGroup.getObjectByName(name))
+      .filter((object): object is THREE.Object3D => !!object);
+    const riderOriginals = riderParts.map((object) => ({
+      object,
+      position: object.position.clone(),
+      quaternion: object.quaternion.clone(),
+    }));
+
+    const headReveal = new THREE.Group();
+    headReveal.name = 'RiderHeadReveal';
+    headReveal.position.set(0.05, 2.22, 0);
+    headReveal.visible = false;
+    const face = new THREE.Mesh(
+      new THREE.SphereGeometry(0.22, 24, 18),
+      new THREE.MeshStandardMaterial({ color: '#9b624c', roughness: 0.78 }),
+    );
+    face.scale.set(1.04, 1.16, 0.96);
+    const hair = new THREE.Mesh(
+      new THREE.SphereGeometry(0.235, 20, 16, 0, Math.PI * 2, 0, Math.PI * 0.62),
+      new THREE.MeshStandardMaterial({ color: '#201712', roughness: 0.9 }),
+    );
+    hair.position.set(-0.04, 0.08, 0);
+    const ponytail = new THREE.Mesh(
+      new THREE.SphereGeometry(0.11, 16, 12),
+      new THREE.MeshStandardMaterial({ color: '#201712', roughness: 0.92 }),
+    );
+    ponytail.position.set(-0.23, -0.08, 0);
+    ponytail.scale.set(1.5, 0.72, 0.8);
+    headReveal.add(face, hair, ponytail);
+    riderGroup.add(headReveal);
+
     clone.updateMatrixWorld(true);
     const bounds = new THREE.Box3().setFromObject(clone);
     return {
       model: clone,
+      riderGroup,
+      helmetGroup,
+      helmetBase,
+      headReveal,
+      riderOriginals,
       floorOffset: 0.08 - bounds.min.y * BIKE_SCALE,
     };
   }, [scene]);
@@ -933,6 +1051,52 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     const delta = Math.min(rawDelta, 0.05);
     const runtime = drive.current;
     const activeStop = controller.activeStop;
+
+    if (previousRideMode.current !== controller.mode) {
+      if (controller.mode === 'finale' && finaleStartedAt.current < 0) finaleStartedAt.current = clock.elapsedTime;
+      previousRideMode.current = controller.mode;
+    }
+    const terminalScene = finaleStartedAt.current >= 0 && controller.completedCount >= PORTFOLIO_STOPS.length;
+    const finaleElapsed = terminalScene ? Math.max(0, clock.elapsedTime - finaleStartedAt.current) : 0;
+
+    if (terminalScene) {
+      const stand = THREE.MathUtils.smootherstep(finaleElapsed, 0.75, 3.15);
+      riderGroup.position.set(-0.18 * stand, -0.05 * stand, 1.24 * stand);
+      riderGroup.rotation.y = -0.04 * stand;
+      for (const snapshot of riderOriginals) {
+        const target = STANDING_RIDER_POSITIONS[snapshot.object.name];
+        if (target) {
+          riderTarget.set(target[0], target[1], target[2]);
+          snapshot.object.position.lerpVectors(snapshot.position, riderTarget, stand);
+          if (snapshot.object.name.startsWith('Riding') && snapshot.object.name.endsWith('.001')) {
+            const stepArc = Math.sin(stand * Math.PI);
+            snapshot.object.position.y += stepArc * 0.24;
+            snapshot.object.position.z -= stepArc * 0.3;
+          }
+        }
+        if (STRAIGHTEN_RIDER_PARTS.has(snapshot.object.name)) {
+          snapshot.object.quaternion.slerpQuaternions(snapshot.quaternion, identityQuaternion, stand);
+        }
+      }
+      const helmetLift = THREE.MathUtils.smootherstep(finaleElapsed, 3.0, 4.0);
+      const helmetCarry = THREE.MathUtils.smootherstep(finaleElapsed, 4.0, 5.35);
+      helmetGroup.position.set(helmetBase.x - 0.2 * helmetCarry, helmetBase.y + 0.34 * helmetLift - 1.35 * helmetCarry, helmetBase.z + 0.48 * helmetCarry);
+      helmetGroup.rotation.x = 0.56 * helmetCarry;
+      helmetGroup.rotation.z = -0.22 * helmetCarry;
+      headReveal.visible = finaleElapsed > 3.7;
+      const headScale = THREE.MathUtils.smootherstep(finaleElapsed, 3.7, 4.1);
+      headReveal.scale.setScalar(headScale);
+    } else {
+      riderGroup.position.set(0, 0, 0);
+      riderGroup.rotation.set(0, 0, 0);
+      helmetGroup.position.copy(helmetBase);
+      helmetGroup.rotation.set(0, 0, 0);
+      headReveal.visible = false;
+      for (const snapshot of riderOriginals) {
+        snapshot.object.position.copy(snapshot.position);
+        snapshot.object.quaternion.copy(snapshot.quaternion);
+      }
+    }
 
     if (runtime.resetApplied !== controller.rideReset) {
       runtime.progress = RIDE_START_PROGRESS;
@@ -947,11 +1111,24 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       runtime.hasLastPosition = false;
       runtime.resetApplied = controller.rideReset;
       runtime.stageApplied = controller.activeIndex;
+      runtime.checkpointResetApplied = controller.checkpointReset;
       runtime.summitReported = false;
       if (activeStop) controller.reportApproach(controller.activeIndex, 0, activeStop.distance - RIDE_START_DISTANCE);
       controller.reportVehicleSpeed(0);
     }
 
+    if (runtime.checkpointResetApplied !== controller.checkpointReset && activeStop) {
+      runtime.progress = THREE.MathUtils.clamp(activeStop.progress - 30 / ROAD_LENGTH, RIDE_START_PROGRESS, SUMMIT_PROGRESS);
+      runtime.velocity = 0.28;
+      runtime.acceleration = 0;
+      runtime.lane = 0;
+      runtime.steer = 0;
+      runtime.targetHit = false;
+      runtime.hasLastPosition = false;
+      runtime.stageApplied = controller.activeIndex;
+      runtime.checkpointResetApplied = controller.checkpointReset;
+      controller.reportApproach(controller.activeIndex, 0.4, 30);
+    }
     if (runtime.stageApplied !== controller.activeIndex) {
       runtime.targetHit = false;
       runtime.stageApplied = controller.activeIndex;
@@ -981,7 +1158,7 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     const throttle = Math.max(heldThrottle, controlMode ? Math.max(0, runtime.gestureThrottle) : 0);
     let desiredVelocity = movingMode ? CRUISE_SPEED + (1 - CRUISE_SPEED) * throttle : 0;
 
-    if (controller.mode === 'target') desiredVelocity = Math.min(desiredVelocity, 0.72);
+    if (controller.mode === 'target') desiredVelocity = Math.min(desiredVelocity, 0.58);
     if (controller.mode === 'aiming' && !runtime.targetHit) desiredVelocity = Math.min(desiredVelocity, AIM_CRAWL_SPEED);
     if (controller.mode === 'shot' || controller.mode === 'reading') desiredVelocity = 0.28;
 
@@ -1037,7 +1214,7 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
 
     if (activeStop && !runtime.targetHit) {
       const distanceToTarget = activeStop.distance - runtime.progress * ROAD_LENGTH;
-      const approach = THREE.MathUtils.clamp((34 - distanceToTarget) / 24, 0, 1);
+      const approach = THREE.MathUtils.clamp((42 - distanceToTarget) / 30, 0, 1);
       controller.reportApproach(controller.activeIndex, approach, distanceToTarget);
     }
 
@@ -1076,7 +1253,7 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     const actualSpeed = runtime.velocity * ROUTE_TOP_SPEED * timeScale;
     const curveLean = -Math.atan((actualSpeed * actualSpeed * curvature) / 9.81);
     const steeringLean = runtime.steer * runtime.velocity * (0.05 + runtime.velocity * 0.12);
-    const leanTarget = controller.mode === 'finale'
+    const leanTarget = terminalScene
       ? 0
       : THREE.MathUtils.clamp(curveLean + steeringLean, -0.46, 0.46);
 
@@ -1092,7 +1269,7 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     }
     if (visual.current) {
       visual.current.rotation.x = THREE.MathUtils.damp(visual.current.rotation.x, leanTarget, 6.8, delta);
-      const pitchTarget = controller.mode === 'finale' ? 0 : THREE.MathUtils.clamp(runtime.acceleration * 0.032, -0.055, 0.032);
+      const pitchTarget = terminalScene ? 0 : THREE.MathUtils.clamp(runtime.acceleration * 0.032, -0.055, 0.032);
       visual.current.rotation.z = THREE.MathUtils.damp(visual.current.rotation.z, pitchTarget, braking ? 10 : 5.5, delta);
       visual.current.position.y = THREE.MathUtils.damp(visual.current.position.y, 0, 10, delta);
     }
@@ -1102,13 +1279,21 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     const focusTarget = !!activeStop && (controller.mode === 'target' || controller.mode === 'aiming' || controller.mode === 'shot');
     const speed01 = runtime.velocity;
 
-    if (controller.mode === 'finale') {
-      desiredCamera.copy(summitPoint).addScaledVector(summitTangent, -10.5).addScaledVector(summitSide, 8.5);
-      desiredCamera.y = summitPoint.y + 5.6;
-      desiredLook.copy(summitPoint).addScaledVector(summitTangent, 62);
-      desiredLook.y = summitPoint.y + 18;
+    const panoramaReveal = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 5.8, 8.8) : 0;
+    if (terminalScene) {
+      finalCameraClose.copy(summitPoint).addScaledVector(summitTangent, -5.6).addScaledVector(summitSide, 7.2);
+      finalCameraClose.y = summitPoint.y + 3.15;
+      finalCameraWide.copy(summitPoint).addScaledVector(summitTangent, -11.5).addScaledVector(summitSide, 9.2);
+      finalCameraWide.y = summitPoint.y + 6.4;
+      desiredCamera.lerpVectors(finalCameraClose, finalCameraWide, panoramaReveal);
+
+      finalLookClose.copy(summitPoint).addScaledVector(summitTangent, 0.8).addScaledVector(summitSide, 1.25);
+      finalLookClose.y = summitPoint.y + 2.05;
+      finalLookWide.copy(summitPoint).addScaledVector(summitTangent, 66);
+      finalLookWide.y = summitPoint.y + 18.5;
+      desiredLook.lerpVectors(finalLookClose, finalLookWide, panoramaReveal);
     } else {
-      const cameraBack = focusTarget ? 7.2 : THREE.MathUtils.lerp(7.6, 9.5, speed01);
+      const cameraBack = focusTarget ? 8.2 : THREE.MathUtils.lerp(7.6, 9.5, speed01);
       const cameraSide = focusTarget ? 1.6 : THREE.MathUtils.lerp(1.5, 0.75, speed01);
       const cameraHeight = focusTarget ? 2.35 : THREE.MathUtils.lerp(2.2, 2.65, speed01);
       desiredCamera.copy(point).addScaledVector(tangent, -(cameraBack - (braking ? 0.4 : 0))).addScaledVector(side, cameraSide);
@@ -1123,11 +1308,11 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       }
     }
 
-    const cameraRate = controller.mode === 'finale' ? 1.15 : 4.8;
+    const cameraRate = terminalScene ? THREE.MathUtils.lerp(2.4, 1.05, panoramaReveal) : 4.8;
     cameraBase.lerp(desiredCamera, 1 - Math.exp(-delta * cameraRate));
-    lookAt.lerp(desiredLook, 1 - Math.exp(-delta * (controller.mode === 'finale' ? 1.35 : 6.5)));
+    lookAt.lerp(desiredLook, 1 - Math.exp(-delta * (terminalScene ? THREE.MathUtils.lerp(2.6, 1.15, panoramaReveal) : 6.5)));
     camera.position.copy(cameraBase);
-    const modeShake = focusTarget ? 0.15 : controller.mode === 'reading' ? 0.08 : controller.mode === 'finale' ? 0 : 1;
+    const modeShake = terminalScene ? 0 : focusTarget ? 0.15 : controller.mode === 'reading' ? 0.08 : 1;
     const shake = speed01 * speed01 * modeShake;
     const time = clock.elapsedTime;
     camera.position.addScaledVector(side, Math.sin(time * 18.7) * 0.035 * shake);
@@ -1135,14 +1320,14 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     camera.lookAt(lookAt);
 
     const perspective = camera as THREE.PerspectiveCamera;
-    const desiredFov = controller.mode === 'finale'
-      ? 47
+    const desiredFov = terminalScene
+      ? THREE.MathUtils.lerp(49, 47, panoramaReveal)
       : controller.mode === 'reading'
         ? 43
         : focusTarget
-          ? 52
+          ? 56
           : 49 + speed01 * 15 - (braking ? 2.5 : 0);
-    perspective.fov += (desiredFov - perspective.fov) * (1 - Math.exp(-delta * (controller.mode === 'finale' ? 1.2 : braking ? 5.5 : 3.4)));
+    perspective.fov += (desiredFov - perspective.fov) * (1 - Math.exp(-delta * (terminalScene ? 1.2 : braking ? 5.5 : 3.4)));
     perspective.updateProjectionMatrix();
   });
 
@@ -1308,11 +1493,11 @@ function RouteTarget({
   const assist = misses >= 2;
   const position: [number, number, number] = [pose.position.x, pose.position.y, pose.position.z];
 
-  return <group ref={group} position={position} rotation={[0, pose.rotationY, 0]}>
+  return <group ref={group} position={position} rotation={[0, pose.rotationY, 0]} scale={active ? 1.18 : 1} renderOrder={active ? 20 : 0}>
     <group ref={board}>
       {active && <mesh onClick={miss} position={[0, 0, 0.1]}>
         <planeGeometry args={[3.82, 2.28]} />
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} depthTest={false} />
       </mesh>}
       <mesh castShadow receiveShadow>
         <boxGeometry args={[3.55, 2.05, 0.16]} />
@@ -1322,21 +1507,23 @@ function RouteTarget({
           roughness={0.34}
           transparent={status === 'upcoming'}
           opacity={status === 'upcoming' ? 0.82 : 1}
+          depthTest={!active}
+          depthWrite={!active}
         />
       </mesh>
       <mesh position={[0, 0.61, 0.11]}>
         <planeGeometry args={[2.52, 0.5]} />
-        <meshBasicMaterial map={titleTexture} transparent depthWrite={false} />
+        <meshBasicMaterial map={titleTexture} transparent depthWrite={false} depthTest={!active} />
       </mesh>
       <mesh position={[0, -0.65, 0.11]}>
         <planeGeometry args={[2.78, 0.23]} />
-        <meshBasicMaterial map={subtitleTexture} transparent depthWrite={false} />
+        <meshBasicMaterial map={subtitleTexture} transparent depthWrite={false} depthTest={!active} />
       </mesh>
 
       {active ? <group ref={core} position={[0, 0, 0.16]}>
         <mesh position={[0, 0, 0.09]} onClick={hit} onPointerOver={lock} onPointerMove={lock} onPointerOut={unlock}>
           <circleGeometry args={[assist ? 0.34 : 0.3, 32]} />
-          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} depthTest={false} />
         </mesh>
         <mesh scale={vulnerable ? 1.18 : 0.92}>
           <torusGeometry args={[0.29, 0.047, 12, 36]} />
@@ -1486,6 +1673,18 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
     setMute,
   } = controller;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showFinale, setShowFinale] = useState(false);
+
+  useEffect(() => {
+    if (mode !== 'finale') {
+      if (controller.completedCount < PORTFOLIO_STOPS.length) setShowFinale(false);
+      return;
+    }
+    if (showFinale) return;
+    const timer = window.setTimeout(() => setShowFinale(true), 7200);
+    return () => window.clearTimeout(timer);
+  }, [controller.completedCount, mode, showFinale]);
+
   const playState = mode === 'finale'
     ? 'SUMMIT / PARKED'
     : mode === 'summit'
@@ -1590,11 +1789,14 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
         {mode === 'target' && <small className="target-prompt">TARGET AHEAD / HOLD YOUR LINE</small>}
         {mode === 'aiming' && <button type="button" aria-label="Fire when the moving core turns gold" onClick={() => shoot(true)}>{targetVulnerable ? 'FIRE NOW / SPACE' : 'WAIT FOR GOLD / SPACE'}</button>}
         {mode === 'aiming' && misses >= 2 && <small className="aim-assist">AIM CALIBRATED</small>}
+        {mode === 'aiming' && misses > 0 && <button className="retry-checkpoint" type="button" onClick={controller.restartCheckpoint}>RETRY CHECKPOINT / START OVER</button>}
       </motion.section>}
 
       {mode === 'reading' && <SectionPanel controller={controller} />}
 
-      {mode === 'finale' && <motion.section className="finale-overlay" initial={{ opacity: 0, y: 28 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1.1, ease: [0.16, 1, 0.3, 1] }} aria-labelledby="summit-title">
+      {mode === 'finale' && !showFinale && <motion.p className="finale-sequence" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>SUMMIT REACHED / RIDER DISMOUNTING</motion.p>}
+
+      {mode === 'finale' && showFinale && <motion.section className="finale-overlay" initial={{ opacity: 0, y: 28 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1.1, ease: [0.16, 1, 0.3, 1] }} aria-labelledby="summit-title">
         <p className="finale-kicker">SUMMIT / JOURNEY COMPLETE</p>
         <h2 id="summit-title">THE VIEW<br />AFTER THE CLIMB.</h2>
         <p className="finale-copy">Apoorva Rawat is a full-stack developer crafting interactive digital experiences where thoughtful engineering meets a strong visual point of view.</p>

@@ -120,6 +120,9 @@ button { cursor: pointer; }
 
 .ride-loader { display: grid; min-height: 100svh; place-content: center; justify-items: center; gap: 15px; color: var(--paper); background: radial-gradient(circle at 50% 42%, #17303a 0%, #071016 55%, #04090d 100%); font-size: 9px; font-weight: 800; letter-spacing: .18em; }.ride-loader span { display: grid; width: 42px; aspect-ratio: 1; place-items: center; color: var(--gold); border: 1px solid var(--gold); border-radius: 50%; font-family: Georgia, serif; font-size: 12px; letter-spacing: 0; }.ride-loader p { margin: 0; }.ride-loader i { width: 90px; height: 1px; overflow: hidden; background: rgba(246, 200, 122, .22); }.ride-loader i::after { display: block; width: 38%; height: 100%; content: ''; background: var(--gold); animation: loader-travel 1.2s ease-in-out infinite; } @keyframes loader-travel { 0% { transform: translateX(-110%); } 100% { transform: translateX(300%); } }
 
+.retry-checkpoint { margin-top: 2px !important; color: rgba(255, 233, 192, .82) !important; border-bottom-color: rgba(255, 233, 192, .46) !important; font-size: 7px !important; }
+.retry-checkpoint:hover { color: #fff0c6 !important; border-bottom-color: var(--gold) !important; }
+.finale-sequence { position: absolute; bottom: clamp(82px, 11vh, 130px); left: clamp(70px, 9vw, 148px); margin: 0; padding: 9px 12px; color: var(--gold); border-left: 1px solid rgba(246, 200, 122, .7); background: rgba(5, 14, 19, .28); backdrop-filter: blur(6px); font-size: 8px; font-weight: 800; letter-spacing: .18em; }
 /* Multi-stop route UI */
 .route-menu > button.is-complete { color: #70807f; }
 .route-menu > button.is-complete:hover { color: #425b5f; }

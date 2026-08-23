@@ -257,11 +257,13 @@ function getRoadsidePose(portfolioStop: PortfolioStop) {
   const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
   const position = point.clone().addScaledVector(side, portfolioStop.side * 7.5);
   position.y += 2.85;
+  // Angle billboard along the roadside slightly parallel to the road (running along the highway shoulder with a gentle 18° angle toward the rider)
+  const parallelAngle = portfolioStop.side * 1.24;
   return {
     position,
     tangent,
     side,
-    rotationY: Math.atan2(-tangent.x, -tangent.z),
+    rotationY: Math.atan2(-tangent.x, -tangent.z) + parallelAngle,
   };
 }
 

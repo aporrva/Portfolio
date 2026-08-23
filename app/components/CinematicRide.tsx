@@ -31,6 +31,7 @@ type RideController = {
   continueRide: () => void;
   restartCheckpoint: () => void;
   openSection: (index: number) => void;
+  openFinale: () => void;
   reportApproach: (stageIndex: number, value: number, distance: number) => void;
   reportVehicleSpeed: (value: number) => void;
   reachFinale: () => void;
@@ -88,7 +89,8 @@ type DriveRef = { current: DriveRuntime };
 const MAX_LANE_OFFSET = 1.28;
 const ROUTE_TOP_SPEED = 10.5;
 const CRUISE_SPEED = 0.22;
-const AIM_CRAWL_SPEED = 0.055;
+const AIM_CRAWL_SPEED = 0.20;
+const TARGET_LOCK_DISTANCE = 12.0;
 const RIDE_START_DISTANCE = 25;
 const SUMMIT_DISTANCE = 625;
 
@@ -251,8 +253,8 @@ function getRoadsidePose(portfolioStop: PortfolioStop) {
   const point = roadCurve.getPointAt(portfolioStop.progress);
   const tangent = roadCurve.getTangentAt(portfolioStop.progress).normalize();
   const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
-  const position = point.clone().addScaledVector(side, portfolioStop.side * 4.35);
-  position.y += 2.05;
+  const position = point.clone().addScaledVector(side, portfolioStop.side * 7.5);
+  position.y += 2.85;
   return {
     position,
     tangent,
@@ -423,7 +425,7 @@ function useRideController(): RideController {
     if (modeRef.current === 'riding' && next > 0.02) {
       transition('target');
       sound(520, 0.12, 'square', 0.026);
-    } else if (modeRef.current === 'target' && next > 0.7) {
+    } else if (modeRef.current === 'target' && Math.abs(distance) <= TARGET_LOCK_DISTANCE) {
       setAimLocked(false);
       setTargetVulnerable(false);
       transition('aiming');
@@ -487,7 +489,7 @@ function useRideController(): RideController {
     lastAttemptAt.current = now;
 
     const distance = Math.abs(targetDistanceRef.current);
-    if (distance > 18) {
+    if (distance > TARGET_LOCK_DISTANCE + 2.5) {
       registerMiss('OUT OF RANGE - HOLD YOUR LINE');
       return;
     }
@@ -510,7 +512,9 @@ function useRideController(): RideController {
     setMissMessage('DIRECT HIT');
     transition('shot');
     setTargetProgress(1);
-    sound(76, 0.2, 'sawtooth', 0.09);
+    sound(980, 0.08, 'sawtooth', 0.09);
+    sound(135, 0.26, 'square', 0.095);
+    window.setTimeout(() => sound(540, 0.18, 'sine', 0.04), 90);
     const driver = { value: 1 };
     const timeline = gsap.timeline();
     mainTimeline.current = timeline;
@@ -598,8 +602,23 @@ function useRideController(): RideController {
     setSpeed(returnSpeedRef.current === 0 ? 0 : 0.2);
   }
 
+  function openFinale() {
+    killTimelines();
+    previewingRef.current = false;
+    setPreviewing(false);
+    setPanelIndex(null);
+    setActiveIndex(PORTFOLIO_STOPS.length);
+    activeIndexRef.current = PORTFOLIO_STOPS.length;
+    setSpeed(0);
+    reportedSpeed.current = 0;
+    setVehicleSpeed(0);
+    transition('finale');
+    sound(196, 0.8, 'sine', 0.045);
+    window.setTimeout(() => sound(392, 1.1, 'sine', 0.03), 260);
+  }
+
   function reachFinale() {
-    if (modeRef.current !== 'summit' || activeIndexRef.current < PORTFOLIO_STOPS.length) return;
+    if (modeRef.current === 'finale') return;
     killTimelines();
     setSpeed(0);
     reportedSpeed.current = 0;
@@ -652,6 +671,7 @@ function useRideController(): RideController {
     continueRide,
     restartCheckpoint,
     openSection,
+    openFinale,
     reportApproach,
     reportVehicleSpeed,
     reachFinale,
@@ -919,6 +939,11 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
   const { camera } = useThree();
   const bikeRoot = useRef<THREE.Group>(null);
   const visual = useRef<THREE.Group>(null);
+  const kickstand = useRef<THREE.Group>(null);
+  const tracerGroup = useRef<THREE.Group>(null);
+  const tracerMesh = useRef<THREE.Mesh>(null);
+  const tracerGlowMesh = useRef<THREE.Mesh>(null);
+  const tracerImpact = useRef<THREE.Mesh>(null);
   const point = useMemo(() => new THREE.Vector3(), []);
   const tangent = useMemo(() => new THREE.Vector3(), []);
   const tangentAhead = useMemo(() => new THREE.Vector3(), []);
@@ -940,16 +965,38 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
   const summitPoint = useMemo(() => roadCurve.getPointAt(SUMMIT_PROGRESS), []);
   const summitTangent = useMemo(() => roadCurve.getTangentAt(SUMMIT_PROGRESS).normalize(), []);
   const summitSide = useMemo(() => new THREE.Vector3(-summitTangent.z, 0, summitTangent.x).normalize(), [summitTangent]);
+  const sunPosition = useMemo(() => new THREE.Vector3(-24, 54, 585), []);
+  const sunDirection = useMemo(() => sunPosition.clone().sub(summitPoint).normalize(), [summitPoint, sunPosition]);
+  const finalRiderYaw = useMemo(() => {
+    const localForward = sunDirection.dot(summitTangent);
+    const localSide = sunDirection.dot(summitSide);
+    return Math.atan2(-localSide, localForward);
+  }, [summitSide, summitTangent, sunDirection]);
   const finaleStartedAt = useRef(-1);
   const previousRideMode = useRef<RideState>('intro');
   const riderTarget = useMemo(() => new THREE.Vector3(), []);
   const identityQuaternion = useMemo(() => new THREE.Quaternion(), []);
-  const finalCameraClose = useMemo(() => new THREE.Vector3(), []);
-  const finalCameraWide = useMemo(() => new THREE.Vector3(), []);
-  const finalLookClose = useMemo(() => new THREE.Vector3(), []);
-  const finalLookWide = useMemo(() => new THREE.Vector3(), []);
+  const aimWeight = useRef(0);
+  const shotFiredAt = useRef(-1);
+  const lastShotStage = useRef(-1);
+  const muzzleWorldPos = useMemo(() => new THREE.Vector3(), []);
+  const tracerMidPos = useMemo(() => new THREE.Vector3(), []);
 
-  const { model, floorOffset, riderGroup, helmetGroup, helmetBase, headReveal, riderOriginals } = useMemo(() => {
+  const {
+    model,
+    floorOffset,
+    riderGroup,
+    helmetGroup,
+    helmetBase,
+    headReveal,
+    ponytailRef,
+    scarfObj,
+    gunGroup,
+    muzzleTip,
+    muzzleFlash,
+    torsoObj,
+    riderOriginals,
+  } = useMemo(() => {
     const clone = scene.clone(true);
     clone.traverse((object) => {
       if (object instanceof THREE.Mesh) {
@@ -1008,27 +1055,118 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       quaternion: object.quaternion.clone(),
     }));
 
+    const scarfObj = riderGroup.getObjectByName('Rider scarf');
+    const torsoObj = riderGroup.getObjectByName('Rider torso jacket');
+
+    // Attach prominent, stylish sci-fi pistol to right glove
+    const rightGlove = riderGroup.getObjectByName('Glove.001');
+    const gunGroup = new THREE.Group();
+    gunGroup.name = 'RiderGun';
+    gunGroup.position.set(0.1, -0.02, 0.06);
+    gunGroup.rotation.set(0.12, -0.16, 0.08);
+    gunGroup.scale.set(1.65, 1.65, 1.65);
+
+    const gunBody = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.13, 0.065),
+      new THREE.MeshStandardMaterial({ color: '#161a1d', metalness: 0.92, roughness: 0.2 }),
+    );
+    gunBody.castShadow = true;
+
+    const gunSlide = new THREE.Mesh(
+      new THREE.BoxGeometry(0.32, 0.075, 0.07),
+      new THREE.MeshStandardMaterial({ color: '#b0c4d4', metalness: 0.96, roughness: 0.15 }),
+    );
+    gunSlide.position.set(0.02, 0.075, 0);
+
+    const energyCore = new THREE.Mesh(
+      new THREE.BoxGeometry(0.15, 0.028, 0.075),
+      new THREE.MeshStandardMaterial({ color: '#ffe882', emissive: '#ffaa22', emissiveIntensity: 4.0 }),
+    );
+    energyCore.position.set(-0.02, 0.025, 0);
+
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.028, 0.03, 0.2, 12),
+      new THREE.MeshStandardMaterial({ color: '#2a3138', metalness: 0.92, roughness: 0.22 }),
+    );
+    barrel.rotation.z = -Math.PI / 2;
+    barrel.position.set(0.24, 0.075, 0);
+
+    const muzzleTip = new THREE.Group();
+    muzzleTip.name = 'GunMuzzleTip';
+    muzzleTip.position.set(0.35, 0.075, 0);
+
+    const muzzleFlash = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.18, 1),
+      new THREE.MeshBasicMaterial({ color: '#fff9d6', transparent: true, opacity: 0, toneMapped: false }),
+    );
+    muzzleFlash.name = 'GunMuzzleFlash';
+    muzzleFlash.position.set(0.35, 0.075, 0);
+    muzzleFlash.scale.set(2.6, 1.4, 1.4);
+
+    const grip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.075, 0.16, 0.055),
+      new THREE.MeshStandardMaterial({ color: '#090b0d', roughness: 0.9 }),
+    );
+    grip.position.set(-0.09, -0.1, 0);
+    grip.rotation.z = -0.28;
+
+    gunGroup.add(gunBody, gunSlide, energyCore, barrel, muzzleTip, muzzleFlash, grip);
+    if (rightGlove) rightGlove.add(gunGroup);
+
     const headReveal = new THREE.Group();
     headReveal.name = 'RiderHeadReveal';
-    headReveal.position.set(0.05, 2.22, 0);
+    headReveal.position.set(0.06, 2.22, 0);
     headReveal.visible = false;
+
+    // Face / head base
     const face = new THREE.Mesh(
       new THREE.SphereGeometry(0.22, 24, 18),
       new THREE.MeshStandardMaterial({ color: '#9b624c', roughness: 0.78 }),
     );
     face.scale.set(1.04, 1.16, 0.96);
+
+    // Styled hair crown
     const hair = new THREE.Mesh(
-      new THREE.SphereGeometry(0.235, 20, 16, 0, Math.PI * 2, 0, Math.PI * 0.62),
-      new THREE.MeshStandardMaterial({ color: '#201712', roughness: 0.9 }),
+      new THREE.SphereGeometry(0.238, 22, 18, 0, Math.PI * 2, 0, Math.PI * 0.64),
+      new THREE.MeshStandardMaterial({ color: '#1a1410', roughness: 0.88 }),
     );
-    hair.position.set(-0.04, 0.08, 0);
+    hair.position.set(-0.03, 0.09, 0);
+
+    // Front bangs / fringe
+    const bangs = new THREE.Mesh(
+      new THREE.SphereGeometry(0.18, 16, 12, 0, Math.PI, 0, Math.PI * 0.45),
+      new THREE.MeshStandardMaterial({ color: '#1a1410', roughness: 0.88 }),
+    );
+    bangs.position.set(0.13, 0.12, 0);
+    bangs.rotation.set(0, Math.PI / 2, -0.3);
+
+    // Cool dark sunglasses
+    const shades = new THREE.Mesh(
+      new THREE.BoxGeometry(0.11, 0.065, 0.28),
+      new THREE.MeshStandardMaterial({ color: '#111518', roughness: 0.25, metalness: 0.8 }),
+    );
+    shades.position.set(0.18, 0.035, 0);
+
+    // Ponytail with hair band
+    const ponytailRef = new THREE.Group();
+    ponytailRef.name = 'PonytailGroup';
+    ponytailRef.position.set(-0.21, 0.02, 0);
+
+    const hairBand = new THREE.Mesh(
+      new THREE.TorusGeometry(0.045, 0.018, 8, 16),
+      new THREE.MeshStandardMaterial({ color: '#d28236', roughness: 0.45 }),
+    );
+    hairBand.rotation.y = Math.PI / 2;
+
     const ponytail = new THREE.Mesh(
-      new THREE.SphereGeometry(0.11, 16, 12),
-      new THREE.MeshStandardMaterial({ color: '#201712', roughness: 0.92 }),
+      new THREE.ConeGeometry(0.09, 0.42, 12),
+      new THREE.MeshStandardMaterial({ color: '#1a1410', roughness: 0.9 }),
     );
-    ponytail.position.set(-0.23, -0.08, 0);
-    ponytail.scale.set(1.5, 0.72, 0.8);
-    headReveal.add(face, hair, ponytail);
+    ponytail.position.set(-0.12, -0.16, 0);
+    ponytail.rotation.z = 0.55;
+
+    ponytailRef.add(hairBand, ponytail);
+    headReveal.add(face, hair, bangs, shades, ponytailRef);
     riderGroup.add(headReveal);
 
     clone.updateMatrixWorld(true);
@@ -1039,6 +1177,12 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       helmetGroup,
       helmetBase,
       headReveal,
+      ponytailRef,
+      scarfObj,
+      gunGroup,
+      muzzleTip,
+      muzzleFlash,
+      torsoObj,
       riderOriginals,
       floorOffset: 0.08 - bounds.min.y * BIKE_SCALE,
     };
@@ -1047,54 +1191,231 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
   const rearWheel = useMemo(() => model.getObjectByName('RearWheelSpin'), [model]);
   const frontWheel = useMemo(() => model.getObjectByName('FrontWheelSpin'), [model]);
 
+  // Cylinder geometry aligned along Z axis for laser beam
+  const tracerBeamGeometry = useMemo(() => {
+    const geom = new THREE.CylinderGeometry(0.042, 0.042, 1, 8);
+    geom.rotateX(Math.PI / 2);
+    return geom;
+  }, []);
+
+  const tracerGlowGeometry = useMemo(() => {
+    const geom = new THREE.CylinderGeometry(0.09, 0.09, 1, 8);
+    geom.rotateX(Math.PI / 2);
+    return geom;
+  }, []);
+
   useFrame(({ clock }, rawDelta) => {
     const delta = Math.min(rawDelta, 0.05);
     const runtime = drive.current;
     const activeStop = controller.activeStop;
 
     if (previousRideMode.current !== controller.mode) {
-      if (controller.mode === 'finale' && finaleStartedAt.current < 0) finaleStartedAt.current = clock.elapsedTime;
+      if (controller.mode === 'finale') {
+        finaleStartedAt.current = clock.elapsedTime;
+      }
+      if (controller.mode === 'shot' && lastShotStage.current !== controller.activeIndex) {
+        lastShotStage.current = controller.activeIndex;
+        shotFiredAt.current = clock.elapsedTime;
+      }
+      if (controller.mode === 'aiming') runtime.velocity = Math.min(runtime.velocity, 0.16);
       previousRideMode.current = controller.mode;
     }
-    const terminalScene = finaleStartedAt.current >= 0 && controller.completedCount >= PORTFOLIO_STOPS.length;
+    const terminalScene = controller.mode === 'finale';
+    if (terminalScene && finaleStartedAt.current < 0) finaleStartedAt.current = clock.elapsedTime;
     const finaleElapsed = terminalScene ? Math.max(0, clock.elapsedTime - finaleStartedAt.current) : 0;
 
+    // Timeline phases:
+    // 0.2s - 2.0s: Puts bike on kickstand & bike settles with realistic lean
+    // 2.0s - 4.8s: Dismounts from bike (swings right leg over, stands on ground)
+    // 4.8s - 7.6s: Takes helmet off (arms reach up, lifts helmet, reveals face/hair, carries helmet to hip)
+    // 7.6s - 11.5s: Walks to the end of the road / scenic overlook edge
+    // 11.5s+: Stands at the edge of the road staring directly at the sun
+    const parkingStand = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 0.2, 1.8) : 0;
+    const dismountProgress = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 2.0, 4.8) : 0;
+    const armLiftProgress = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 4.8, 5.9) : 0;
+    const helmetLift = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 5.6, 6.7) : 0;
+    const helmetCarry = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 6.4, 7.6) : 0;
+    const walkProgress = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 7.8, 11.6) : 0;
+
+    // Gun aiming & shooting weights
+    const isAimingMode = (controller.mode === 'aiming' || controller.mode === 'shot') && !terminalScene;
+    const targetAimWeight = isAimingMode ? 1 : 0;
+    aimWeight.current = THREE.MathUtils.damp(aimWeight.current, targetAimWeight, 9, delta);
+
+    const timeSinceShot = shotFiredAt.current >= 0 ? clock.elapsedTime - shotFiredAt.current : 999;
+    const isLaserShooting = timeSinceShot >= 0 && timeSinceShot < 0.42;
+    const recoilKick = Math.sin(THREE.MathUtils.clamp(timeSinceShot / 0.28, 0, 1) * Math.PI);
+
+    // Muzzle flash animation
+    if (muzzleFlash) {
+      const flashOpacity = isLaserShooting ? Math.max(0, 1 - timeSinceShot * 4.5) : 0;
+      (muzzleFlash.material as THREE.MeshBasicMaterial).opacity = flashOpacity;
+      muzzleFlash.scale.setScalar(THREE.MathUtils.lerp(2.2, 0.4, THREE.MathUtils.clamp(timeSinceShot / 0.35, 0, 1)));
+    }
+
+    // Laser tracer beam animation
+    if (tracerGroup.current && isLaserShooting && activeStop) {
+      muzzleTip.getWorldPosition(muzzleWorldPos);
+      const targetPose = getRoadsidePose(activeStop);
+      const targetWorld = targetPose.position.clone();
+      targetWorld.y += 0.05;
+
+      const beamDist = muzzleWorldPos.distanceTo(targetWorld);
+      tracerMidPos.lerpVectors(muzzleWorldPos, targetWorld, 0.5);
+
+      tracerGroup.current.visible = true;
+      tracerGroup.current.position.copy(tracerMidPos);
+      tracerGroup.current.lookAt(targetWorld);
+      tracerGroup.current.scale.set(1, 1, beamDist);
+
+      const fade = Math.max(0, 1 - timeSinceShot / 0.42);
+      if (tracerMesh.current) (tracerMesh.current.material as THREE.MeshBasicMaterial).opacity = fade * 0.95;
+      if (tracerGlowMesh.current) (tracerGlowMesh.current.material as THREE.MeshBasicMaterial).opacity = fade * 0.48;
+      if (tracerImpact.current) {
+        tracerImpact.current.position.set(0, 0, beamDist / 2);
+        (tracerImpact.current.material as THREE.MeshBasicMaterial).opacity = fade * 0.85;
+      }
+    } else {
+      if (tracerGroup.current) tracerGroup.current.visible = false;
+    }
+
     if (terminalScene) {
-      const stand = THREE.MathUtils.smootherstep(finaleElapsed, 0.75, 3.15);
-      riderGroup.position.set(-0.18 * stand, -0.05 * stand, 1.24 * stand);
-      riderGroup.rotation.y = -0.04 * stand;
+      // In finale, gun is holstered
+      if (gunGroup) gunGroup.visible = false;
+
+      const sideX = -0.22 * dismountProgress;
+      const sideZ = 1.25 * dismountProgress;
+      const walkWeight = Math.sin(Math.PI * walkProgress);
+      const walkStride = Math.sin(finaleElapsed * 6.8) * walkWeight;
+
+      // Rider root position & rotation
+      const riderTargetX = THREE.MathUtils.lerp(sideX, 4.8, walkProgress);
+      const riderTargetZ = THREE.MathUtils.lerp(sideZ, 0.55, walkProgress);
+      const riderTargetY = -0.05 * dismountProgress + Math.abs(walkStride) * 0.025;
+
+      riderGroup.position.set(riderTargetX, riderTargetY, riderTargetZ);
+      riderGroup.rotation.x = -0.065 * parkingStand * dismountProgress;
+      riderGroup.rotation.y = THREE.MathUtils.lerp(-0.04 * dismountProgress, finalRiderYaw, walkProgress);
+
+      // Rider body parts articulation
       for (const snapshot of riderOriginals) {
         const target = STANDING_RIDER_POSITIONS[snapshot.object.name];
         if (target) {
           riderTarget.set(target[0], target[1], target[2]);
-          snapshot.object.position.lerpVectors(snapshot.position, riderTarget, stand);
+          snapshot.object.position.lerpVectors(snapshot.position, riderTarget, dismountProgress);
+
+          // Right leg swing over the cafe seat during dismount
           if (snapshot.object.name.startsWith('Riding') && snapshot.object.name.endsWith('.001')) {
-            const stepArc = Math.sin(stand * Math.PI);
-            snapshot.object.position.y += stepArc * 0.24;
-            snapshot.object.position.z -= stepArc * 0.3;
+            const stepArc = Math.sin(dismountProgress * Math.PI);
+            snapshot.object.position.y += stepArc * 0.28;
+            snapshot.object.position.z -= stepArc * 0.32;
+          }
+
+          // Natural walking leg stride
+          if (walkProgress > 0 && walkProgress < 1 && snapshot.object.name.startsWith('Riding')) {
+            const legPhase = snapshot.object.name.endsWith('.001') ? -walkStride : walkStride;
+            snapshot.object.position.x += legPhase * 0.12;
+            snapshot.object.position.y += Math.max(0, -legPhase) * 0.04;
+          }
+
+          // Arm animation: Raising to helmet, lifting, and carrying down to hip
+          const isLeftArm = snapshot.object.name === 'Jacket arm' || snapshot.object.name === 'Gloved forearm' || snapshot.object.name === 'Glove';
+          const isRightArm = snapshot.object.name === 'Jacket arm.001' || snapshot.object.name === 'Gloved forearm.001' || snapshot.object.name === 'Glove.001';
+
+          if (dismountProgress >= 0.95) {
+            if (isLeftArm) {
+              const liftY = 0.58 * armLiftProgress - 0.42 * helmetCarry;
+              const liftX = 0.32 * armLiftProgress - 0.24 * helmetCarry;
+              const liftZ = 0.08 * armLiftProgress + 0.18 * helmetCarry;
+              snapshot.object.position.y += liftY;
+              snapshot.object.position.x += liftX;
+              snapshot.object.position.z += liftZ;
+            } else if (isRightArm) {
+              const liftY = 0.58 * armLiftProgress - 0.58 * helmetCarry;
+              const liftX = 0.32 * armLiftProgress - 0.32 * helmetCarry;
+              snapshot.object.position.y += liftY;
+              snapshot.object.position.x += liftX;
+              if (walkProgress > 0 && walkProgress < 1) {
+                snapshot.object.position.x += walkStride * 0.12;
+              }
+            }
           }
         }
+
         if (STRAIGHTEN_RIDER_PARTS.has(snapshot.object.name)) {
-          snapshot.object.quaternion.slerpQuaternions(snapshot.quaternion, identityQuaternion, stand);
+          snapshot.object.quaternion.slerpQuaternions(snapshot.quaternion, identityQuaternion, dismountProgress);
         }
       }
-      const helmetLift = THREE.MathUtils.smootherstep(finaleElapsed, 3.0, 4.0);
-      const helmetCarry = THREE.MathUtils.smootherstep(finaleElapsed, 4.0, 5.35);
-      helmetGroup.position.set(helmetBase.x - 0.2 * helmetCarry, helmetBase.y + 0.34 * helmetLift - 1.35 * helmetCarry, helmetBase.z + 0.48 * helmetCarry);
-      helmetGroup.rotation.x = 0.56 * helmetCarry;
-      helmetGroup.rotation.z = -0.22 * helmetCarry;
-      headReveal.visible = finaleElapsed > 3.7;
-      const headScale = THREE.MathUtils.smootherstep(finaleElapsed, 3.7, 4.1);
+
+      // Helmet removal animation (lifts up from head, moves down to rest beside left hip)
+      helmetGroup.position.set(
+        helmetBase.x - 0.26 * helmetCarry,
+        helmetBase.y + 0.42 * helmetLift - 1.34 * helmetCarry,
+        helmetBase.z + 0.44 * helmetCarry,
+      );
+      helmetGroup.rotation.x = 0.54 * helmetCarry;
+      helmetGroup.rotation.z = -0.2 * helmetCarry;
+
+      // Reveal head/face and hair once helmet begins lifting
+      headReveal.visible = finaleElapsed > 5.5;
+      const headScale = THREE.MathUtils.smootherstep(finaleElapsed, 5.5, 6.1);
       headReveal.scale.setScalar(headScale);
+
+      // Ponytail & scarf gentle wind sway
+      if (ponytailRef) {
+        ponytailRef.rotation.z = 0.12 + Math.sin(clock.elapsedTime * 3.6) * 0.09;
+        ponytailRef.rotation.y = Math.sin(clock.elapsedTime * 2.4) * 0.06;
+      }
+      if (scarfObj) {
+        scarfObj.rotation.x = Math.sin(clock.elapsedTime * 4.2) * 0.06;
+      }
     } else {
+      // Normal driving / aiming posture
       riderGroup.position.set(0, 0, 0);
       riderGroup.rotation.set(0, 0, 0);
       helmetGroup.position.copy(helmetBase);
       helmetGroup.rotation.set(0, 0, 0);
       headReveal.visible = false;
+
+      const currentAim = aimWeight.current;
+      if (gunGroup) gunGroup.visible = currentAim > 0.02;
+
       for (const snapshot of riderOriginals) {
         snapshot.object.position.copy(snapshot.position);
         snapshot.object.quaternion.copy(snapshot.quaternion);
+
+        // One-handed driving + right arm dramatically raised & pointing gun towards target
+        if (currentAim > 0.001) {
+          if (snapshot.object.name === 'Jacket arm.001') {
+            snapshot.object.position.y += 0.42 * currentAim;
+            snapshot.object.position.z -= 0.48 * currentAim;
+            snapshot.object.position.x += 0.28 * currentAim;
+            snapshot.object.rotation.z += 0.62 * currentAim;
+            snapshot.object.rotation.y -= 0.85 * currentAim;
+          } else if (snapshot.object.name === 'Gloved forearm.001') {
+            snapshot.object.position.y += 0.68 * currentAim;
+            snapshot.object.position.z -= 0.92 * currentAim;
+            snapshot.object.position.x += 0.42 * currentAim;
+            snapshot.object.rotation.z += 0.52 * currentAim;
+            snapshot.object.rotation.y -= 1.05 * currentAim;
+          } else if (snapshot.object.name === 'Glove.001') {
+            snapshot.object.position.y += 0.78 * currentAim + (isLaserShooting ? recoilKick * 0.12 : 0);
+            snapshot.object.position.z -= 1.25 * currentAim;
+            snapshot.object.position.x += 0.55 * currentAim - (isLaserShooting ? recoilKick * 0.24 : 0);
+            snapshot.object.rotation.z += 0.42 * currentAim - (isLaserShooting ? recoilKick * 0.42 : 0);
+            snapshot.object.rotation.y -= 1.28 * currentAim;
+          }
+        }
+      }
+
+      // Upper torso and helmet turn towards the target when aiming
+      if (torsoObj && currentAim > 0.001) {
+        torsoObj.rotation.y = -0.38 * currentAim;
+        torsoObj.rotation.z = -0.09 * currentAim;
+      }
+      if (helmetGroup && currentAim > 0.001) {
+        helmetGroup.rotation.y = -0.58 * currentAim;
+        helmetGroup.rotation.x = -0.1 * currentAim;
       }
     }
 
@@ -1113,12 +1434,15 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       runtime.stageApplied = controller.activeIndex;
       runtime.checkpointResetApplied = controller.checkpointReset;
       runtime.summitReported = false;
+      finaleStartedAt.current = -1;
+      shotFiredAt.current = -1;
+      lastShotStage.current = -1;
       if (activeStop) controller.reportApproach(controller.activeIndex, 0, activeStop.distance - RIDE_START_DISTANCE);
       controller.reportVehicleSpeed(0);
     }
 
     if (runtime.checkpointResetApplied !== controller.checkpointReset && activeStop) {
-      runtime.progress = THREE.MathUtils.clamp(activeStop.progress - 30 / ROAD_LENGTH, RIDE_START_PROGRESS, SUMMIT_PROGRESS);
+      runtime.progress = THREE.MathUtils.clamp(activeStop.progress - 24 / ROAD_LENGTH, RIDE_START_PROGRESS, SUMMIT_PROGRESS);
       runtime.velocity = 0.28;
       runtime.acceleration = 0;
       runtime.lane = 0;
@@ -1127,7 +1451,7 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       runtime.hasLastPosition = false;
       runtime.stageApplied = controller.activeIndex;
       runtime.checkpointResetApplied = controller.checkpointReset;
-      controller.reportApproach(controller.activeIndex, 0.4, 30);
+      controller.reportApproach(controller.activeIndex, 0.4, 24);
     }
     if (runtime.stageApplied !== controller.activeIndex) {
       runtime.targetHit = false;
@@ -1158,7 +1482,6 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     const throttle = Math.max(heldThrottle, controlMode ? Math.max(0, runtime.gestureThrottle) : 0);
     let desiredVelocity = movingMode ? CRUISE_SPEED + (1 - CRUISE_SPEED) * throttle : 0;
 
-    if (controller.mode === 'target') desiredVelocity = Math.min(desiredVelocity, 0.58);
     if (controller.mode === 'aiming' && !runtime.targetHit) desiredVelocity = Math.min(desiredVelocity, AIM_CRAWL_SPEED);
     if (controller.mode === 'shot' || controller.mode === 'reading') desiredVelocity = 0.28;
 
@@ -1166,11 +1489,12 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     const summitRemaining = SUMMIT_DISTANCE - currentDistance;
     let terminalBraking = false;
     if (controller.mode === 'summit') {
-      if (summitRemaining < 30) {
-        const summitLimit = THREE.MathUtils.lerp(0.045, 0.62, THREE.MathUtils.clamp(summitRemaining / 30, 0, 1));
+      desiredVelocity = Math.max(0.52, CRUISE_SPEED + (1 - CRUISE_SPEED) * throttle);
+      if (summitRemaining < 36) {
+        const summitLimit = THREE.MathUtils.lerp(0.04, 0.52, THREE.MathUtils.clamp(summitRemaining / 36, 0, 1));
         desiredVelocity = Math.min(desiredVelocity, summitLimit);
       }
-      if (summitRemaining <= 0.28) {
+      if (summitRemaining <= 0.8) {
         desiredVelocity = 0;
         terminalBraking = true;
       }
@@ -1183,7 +1507,7 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     const decelerationRate = braking || terminalBraking
       ? 1.65
       : controller.mode === 'aiming'
-        ? 1.15
+        ? 1.25
         : controller.mode === 'target' || controller.mode === 'summit'
           ? 0.62
           : 0.34;
@@ -1214,15 +1538,14 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
 
     if (activeStop && !runtime.targetHit) {
       const distanceToTarget = activeStop.distance - runtime.progress * ROAD_LENGTH;
-      const approach = THREE.MathUtils.clamp((42 - distanceToTarget) / 30, 0, 1);
+      const approach = THREE.MathUtils.clamp((32 - distanceToTarget) / 22, 0, 1);
       controller.reportApproach(controller.activeIndex, approach, distanceToTarget);
     }
 
     if (
       controller.mode === 'summit'
       && !runtime.summitReported
-      && SUMMIT_DISTANCE - runtime.progress * ROAD_LENGTH <= 0.08
-      && runtime.velocity <= 0.025
+      && (summitRemaining <= 0.85 || (summitRemaining <= 4.0 && runtime.velocity <= 0.065))
     ) {
       runtime.summitReported = true;
       controller.reachFinale();
@@ -1254,7 +1577,7 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     const curveLean = -Math.atan((actualSpeed * actualSpeed * curvature) / 9.81);
     const steeringLean = runtime.steer * runtime.velocity * (0.05 + runtime.velocity * 0.12);
     const leanTarget = terminalScene
-      ? 0
+      ? 0.085 * parkingStand
       : THREE.MathUtils.clamp(curveLean + steeringLean, -0.46, 0.46);
 
     heading.copy(tangent).addScaledVector(side, runtime.steer * 0.08).normalize();
@@ -1273,84 +1596,176 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       visual.current.rotation.z = THREE.MathUtils.damp(visual.current.rotation.z, pitchTarget, braking ? 10 : 5.5, delta);
       visual.current.position.y = THREE.MathUtils.damp(visual.current.position.y, 0, 10, delta);
     }
+    if (kickstand.current) {
+      kickstand.current.rotation.x = THREE.MathUtils.lerp(-0.18, -0.42, parkingStand);
+      kickstand.current.rotation.z = THREE.MathUtils.lerp(-1.35, 0, parkingStand);
+    }
     if (rearWheel) rearWheel.rotation.z = -runtime.wheelAngle;
     if (frontWheel) frontWheel.rotation.z = -runtime.wheelAngle;
 
-    const focusTarget = !!activeStop && (controller.mode === 'target' || controller.mode === 'aiming' || controller.mode === 'shot');
+    const focusTarget = !terminalScene && !!activeStop && (controller.mode === 'target' || controller.mode === 'aiming' || controller.mode === 'shot');
     const speed01 = runtime.velocity;
 
-    const panoramaReveal = terminalScene ? THREE.MathUtils.smootherstep(finaleElapsed, 5.8, 8.8) : 0;
     if (terminalScene) {
-      finalCameraClose.copy(summitPoint).addScaledVector(summitTangent, -5.6).addScaledVector(summitSide, 7.2);
-      finalCameraClose.y = summitPoint.y + 3.15;
-      finalCameraWide.copy(summitPoint).addScaledVector(summitTangent, -11.5).addScaledVector(summitSide, 9.2);
-      finalCameraWide.y = summitPoint.y + 6.4;
-      desiredCamera.lerpVectors(finalCameraClose, finalCameraWide, panoramaReveal);
+      // Keyframe 1: Parking & Dismount (0s - 4.8s)
+      const cam1Pos = summitPoint.clone().addScaledVector(summitTangent, -4.2).addScaledVector(summitSide, 4.5);
+      cam1Pos.y = summitPoint.y + 2.2;
+      const cam1Look = summitPoint.clone().addScaledVector(summitTangent, 0.2).addScaledVector(summitSide, 0.8);
+      cam1Look.y = summitPoint.y + 1.4;
 
-      finalLookClose.copy(summitPoint).addScaledVector(summitTangent, 0.8).addScaledVector(summitSide, 1.25);
-      finalLookClose.y = summitPoint.y + 2.05;
-      finalLookWide.copy(summitPoint).addScaledVector(summitTangent, 66);
-      finalLookWide.y = summitPoint.y + 18.5;
-      desiredLook.lerpVectors(finalLookClose, finalLookWide, panoramaReveal);
+      // Keyframe 2: Helmet Removal Close-up Portrait (4.8s - 7.6s)
+      const cam2Pos = summitPoint.clone().addScaledVector(summitTangent, 1.2).addScaledVector(summitSide, 2.8);
+      cam2Pos.y = summitPoint.y + 2.3;
+      const cam2Look = summitPoint.clone().addScaledVector(summitTangent, -0.2).addScaledVector(summitSide, 1.25);
+      cam2Look.y = summitPoint.y + 2.15;
+
+      // Keyframe 3: Walking Tracking (7.6s - 11.5s)
+      const currentRiderPos = summitPoint.clone()
+        .addScaledVector(summitTangent, THREE.MathUtils.lerp(-0.22, 4.8, walkProgress))
+        .addScaledVector(summitSide, THREE.MathUtils.lerp(1.25, 0.55, walkProgress));
+      currentRiderPos.y = summitPoint.y + 1.6;
+
+      const cam3Pos = summitPoint.clone()
+        .addScaledVector(summitTangent, THREE.MathUtils.lerp(-2.6, 1.8, walkProgress))
+        .addScaledVector(summitSide, 5.2);
+      cam3Pos.y = summitPoint.y + 2.6;
+      const cam3Look = currentRiderPos;
+
+      // Keyframe 4: Majestic Wide Vista at Sun (11.5s+)
+      const cam4Pos = summitPoint.clone().addScaledVector(summitTangent, -10.5).addScaledVector(summitSide, 8.8);
+      cam4Pos.y = summitPoint.y + 6.2;
+      const cam4Look = summitPoint.clone().addScaledVector(sunDirection, 65);
+      cam4Look.y = summitPoint.y + 2.8;
+
+      // Smooth blends between keyframe stages
+      const t12 = THREE.MathUtils.smootherstep(finaleElapsed, 4.2, 5.4);
+      const t23 = THREE.MathUtils.smootherstep(finaleElapsed, 7.2, 8.4);
+      const t34 = THREE.MathUtils.smootherstep(finaleElapsed, 11.0, 14.5);
+
+      const blend12Pos = new THREE.Vector3().lerpVectors(cam1Pos, cam2Pos, t12);
+      const blend12Look = new THREE.Vector3().lerpVectors(cam1Look, cam2Look, t12);
+
+      const blend23Pos = new THREE.Vector3().lerpVectors(blend12Pos, cam3Pos, t23);
+      const blend23Look = new THREE.Vector3().lerpVectors(blend12Look, cam3Look, t23);
+
+      desiredCamera.lerpVectors(blend23Pos, cam4Pos, t34);
+      desiredLook.lerpVectors(blend23Look, cam4Look, t34);
     } else {
-      const cameraBack = focusTarget ? 8.2 : THREE.MathUtils.lerp(7.6, 9.5, speed01);
-      const cameraSide = focusTarget ? 1.6 : THREE.MathUtils.lerp(1.5, 0.75, speed01);
-      const cameraHeight = focusTarget ? 2.35 : THREE.MathUtils.lerp(2.2, 2.65, speed01);
-      desiredCamera.copy(point).addScaledVector(tangent, -(cameraBack - (braking ? 0.4 : 0))).addScaledVector(side, cameraSide);
-      desiredCamera.y = point.y + cameraHeight - (braking ? 0.1 : 0);
+      const isAiming = controller.mode === 'aiming' || controller.mode === 'shot';
+      const isTarget = controller.mode === 'target';
 
-      if (focusTarget) {
-        desiredLook.copy(signFocus);
+      if (isAiming) {
+        // Heroic over-the-left-shoulder cinematic tracking camera:
+        // Positioned left-rear so her extended right arm, the metallic sidearm, and the huge roadside target billboard ahead are crystal clear
+        const cameraBack = 4.2;
+        const cameraSide = 2.65;
+        const cameraHeight = 1.78;
+        desiredCamera.copy(point).addScaledVector(tangent, -(cameraBack - (braking ? 0.3 : 0))).addScaledVector(side, cameraSide);
+        desiredCamera.y = point.y + cameraHeight - (braking ? 0.1 : 0);
+
+        // Frame the sightline from her gun out towards the giant roadside billboard
+        const aimCenter = signFocus.clone().lerp(point.clone().addScaledVector(tangent, 3.5), 0.22);
+        desiredLook.copy(aimCenter);
+      } else if (isTarget) {
+        const cameraBack = 7.2;
+        const cameraSide = 1.75;
+        const cameraHeight = 2.05;
+        desiredCamera.copy(point).addScaledVector(tangent, -cameraBack).addScaledVector(side, cameraSide);
+        desiredCamera.y = point.y + cameraHeight;
+        desiredLook.copy(signFocus).lerp(point.clone().addScaledVector(tangent, 5.5), 0.42);
       } else {
         const lookAhead = THREE.MathUtils.lerp(5.5, 10.5, speed01);
+        const cameraBack = THREE.MathUtils.lerp(7.6, 9.5, speed01);
+        const cameraSide = THREE.MathUtils.lerp(1.5, 0.75, speed01);
+        const cameraHeight = THREE.MathUtils.lerp(2.2, 2.65, speed01);
+        desiredCamera.copy(point).addScaledVector(tangent, -(cameraBack - (braking ? 0.4 : 0))).addScaledVector(side, cameraSide);
+        desiredCamera.y = point.y + cameraHeight - (braking ? 0.1 : 0);
         desiredLook.copy(point).addScaledVector(tangent, lookAhead).addScaledVector(side, runtime.steer * 0.35);
         desiredLook.y = point.y + 1.25 - runtime.pointerY * 0.2;
       }
     }
 
-    const cameraRate = terminalScene ? THREE.MathUtils.lerp(2.4, 1.05, panoramaReveal) : 4.8;
+    const cameraRate = terminalScene
+      ? THREE.MathUtils.lerp(2.6, 1.1, THREE.MathUtils.smootherstep(finaleElapsed, 11.0, 14.5))
+      : (controller.mode === 'aiming' || controller.mode === 'shot')
+        ? 6.8
+        : 4.8;
     cameraBase.lerp(desiredCamera, 1 - Math.exp(-delta * cameraRate));
-    lookAt.lerp(desiredLook, 1 - Math.exp(-delta * (terminalScene ? THREE.MathUtils.lerp(2.6, 1.15, panoramaReveal) : 6.5)));
+    lookAt.lerp(desiredLook, 1 - Math.exp(-delta * (terminalScene ? 3.2 : 7.2)));
     camera.position.copy(cameraBase);
-    const modeShake = terminalScene ? 0 : focusTarget ? 0.15 : controller.mode === 'reading' ? 0.08 : 1;
+    const modeShake = terminalScene ? 0 : focusTarget ? 0.08 : controller.mode === 'reading' ? 0.06 : 1;
     const shake = speed01 * speed01 * modeShake;
     const time = clock.elapsedTime;
     camera.position.addScaledVector(side, Math.sin(time * 18.7) * 0.035 * shake);
     camera.position.y += (Math.sin(time * 23.3) + Math.sin(time * 9.1) * 0.45) * 0.018 * shake;
     camera.lookAt(lookAt);
 
+    // Subtle cinematic Dutch tilt during aiming / cornering
+    if (!terminalScene) {
+      const aimTilt = (controller.mode === 'aiming' || controller.mode === 'shot') ? -0.042 : 0;
+      camera.rotation.z += aimTilt;
+    }
+
     const perspective = camera as THREE.PerspectiveCamera;
     const desiredFov = terminalScene
-      ? THREE.MathUtils.lerp(49, 47, panoramaReveal)
+      ? THREE.MathUtils.lerp(48, 46, THREE.MathUtils.smootherstep(finaleElapsed, 11.0, 14.5))
       : controller.mode === 'reading'
         ? 43
-        : focusTarget
-          ? 56
-          : 49 + speed01 * 15 - (braking ? 2.5 : 0);
-    perspective.fov += (desiredFov - perspective.fov) * (1 - Math.exp(-delta * (terminalScene ? 1.2 : braking ? 5.5 : 3.4)));
+        : controller.mode === 'aiming' || controller.mode === 'shot'
+          ? 44
+          : controller.mode === 'target'
+            ? 50
+            : 49 + speed01 * 15 - (braking ? 2.5 : 0);
+    perspective.fov += (desiredFov - perspective.fov) * (1 - Math.exp(-delta * (terminalScene ? 1.2 : braking ? 5.5 : 4.5)));
     perspective.updateProjectionMatrix();
   });
 
-  return <group ref={bikeRoot}>
-    <group ref={visual} scale={BIKE_SCALE}>
-      <primitive object={model} />
+  return <>
+    <group ref={bikeRoot}>
+      <group ref={visual} scale={BIKE_SCALE}>
+        <primitive object={model} />
+        <group ref={kickstand} position={[-0.45, 0.55, 0.34]} rotation={[-0.18, 0, -1.35]}>
+          <mesh position={[0, -0.38, 0]} castShadow>
+            <cylinderGeometry args={[0.035, 0.045, 0.76, 8]} />
+            <meshStandardMaterial color="#202326" metalness={0.78} roughness={0.32} />
+          </mesh>
+          <mesh position={[0, -0.76, 0]} scale={[1.5, 0.35, 1]} castShadow>
+            <sphereGeometry args={[0.08, 10, 8]} />
+            <meshStandardMaterial color="#202326" metalness={0.78} roughness={0.32} />
+          </mesh>
+        </group>
+      </group>
     </group>
-  </group>;
+
+    {/* Dynamic Laser Tracer Beam fired from Gun to Target */}
+    <group ref={tracerGroup} visible={false}>
+      <mesh ref={tracerMesh} geometry={tracerBeamGeometry}>
+        <meshBasicMaterial color="#fff3a8" transparent opacity={0.95} toneMapped={false} />
+      </mesh>
+      <mesh ref={tracerGlowMesh} geometry={tracerGlowGeometry}>
+        <meshBasicMaterial color="#ff9922" transparent opacity={0.48} toneMapped={false} />
+      </mesh>
+      <mesh ref={tracerImpact} scale={1.2}>
+        <sphereGeometry args={[0.22, 16, 16]} />
+        <meshBasicMaterial color="#ffdd77" transparent opacity={0.85} toneMapped={false} />
+      </mesh>
+    </group>
+  </>;
 }
 
 function createSignTexture(label: string, color: string, fontSize: number) {
   const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 256;
+  canvas.width = 1536;
+  canvas.height = 384;
   const context = canvas.getContext('2d');
   if (!context) return new THREE.Texture();
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.fillStyle = color;
-  context.font = '700 ' + fontSize + 'px Arial';
+  context.font = '800 ' + fontSize + 'px Arial, sans-serif';
   context.textAlign = 'center';
   context.textBaseline = 'middle';
-  context.letterSpacing = '12px';
-  context.fillText(label, canvas.width / 2, canvas.height / 2 + 8);
+  context.letterSpacing = '14px';
+  context.fillText(label, canvas.width / 2, canvas.height / 2 + 10);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
@@ -1390,11 +1805,11 @@ function RouteTarget({
   const active = status === 'active';
   const pose = useMemo(() => getRoadsidePose(portfolioStop), [portfolioStop]);
   const titleTexture = useMemo(
-    () => createSignTexture(portfolioStop.label, status === 'upcoming' ? '#879599' : '#f7ebd5', portfolioStop.label.length > 8 ? 92 : 124),
+    () => createSignTexture(portfolioStop.label, status === 'upcoming' ? '#879599' : '#f7ebd5', portfolioStop.label.length > 8 ? 120 : 155),
     [portfolioStop.label, status],
   );
   const subtitleTexture = useMemo(
-    () => createSignTexture(status === 'completed' ? 'CHECKPOINT COMPLETE' : portfolioStop.signSubtitle, status === 'completed' ? '#f6c87a' : '#d4a065', 34),
+    () => createSignTexture(status === 'completed' ? 'CHECKPOINT COMPLETE' : portfolioStop.signSubtitle, status === 'completed' ? '#f6c87a' : '#d4a065', 46),
     [portfolioStop.signSubtitle, status],
   );
 
@@ -1461,13 +1876,13 @@ function RouteTarget({
     }
 
     const motionScale = assist ? 0.8 : 1;
-    const targetX = aiming ? Math.sin(phaseTime * 1.65) * 0.58 * motionScale : 0;
-    const targetY = aiming ? Math.sin(phaseTime * 2.3 + 0.65) * 0.28 * motionScale : 0;
+    const targetX = aiming ? Math.sin(phaseTime * 1.65) * 0.72 * motionScale : 0;
+    const targetY = aiming ? Math.sin(phaseTime * 2.3 + 0.65) * 0.38 * motionScale : 0;
     core.current.position.x = THREE.MathUtils.damp(core.current.position.x, targetX, 9, delta);
     core.current.position.y = THREE.MathUtils.damp(core.current.position.y, targetY, 9, delta);
-    core.current.position.z = 0.16;
+    core.current.position.z = 0.18;
     core.current.rotation.z = phaseTime * (vulnerable ? 2.2 : 0.9);
-    core.current.scale.setScalar(vulnerable ? 1.12 + Math.sin(clock.elapsedTime * 15) * 0.05 : 0.92 + Math.sin(clock.elapsedTime * 5) * 0.03);
+    core.current.scale.setScalar(vulnerable ? 1.15 + Math.sin(clock.elapsedTime * 15) * 0.06 : 0.95 + Math.sin(clock.elapsedTime * 5) * 0.03);
   });
 
   const hit = (event: ThreeEvent<MouseEvent>) => {
@@ -1493,78 +1908,76 @@ function RouteTarget({
   const assist = misses >= 2;
   const position: [number, number, number] = [pose.position.x, pose.position.y, pose.position.z];
 
-  return <group ref={group} position={position} rotation={[0, pose.rotationY, 0]} scale={active ? 1.18 : 1} renderOrder={active ? 20 : 0}>
+  return <group ref={group} position={position} rotation={[0, pose.rotationY, 0]} scale={active ? 1.32 : 1.15}>
     <group ref={board}>
-      {active && <mesh onClick={miss} position={[0, 0, 0.1]}>
-        <planeGeometry args={[3.82, 2.28]} />
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} depthTest={false} />
+      {active && <mesh onClick={miss} position={[0, 0, 0.12]}>
+        <planeGeometry args={[5.5, 3.2]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>}
       <mesh castShadow receiveShadow>
-        <boxGeometry args={[3.55, 2.05, 0.16]} />
+        <boxGeometry args={[5.2, 2.9, 0.22]} />
         <meshStandardMaterial
           color={status === 'completed' ? '#4f4a39' : status === 'active' ? '#132127' : '#1e2c31'}
-          metalness={0.52}
-          roughness={0.34}
+          metalness={0.55}
+          roughness={0.32}
           transparent={status === 'upcoming'}
           opacity={status === 'upcoming' ? 0.82 : 1}
-          depthTest={!active}
-          depthWrite={!active}
         />
       </mesh>
-      <mesh position={[0, 0.61, 0.11]}>
-        <planeGeometry args={[2.52, 0.5]} />
-        <meshBasicMaterial map={titleTexture} transparent depthWrite={false} depthTest={!active} />
+      <mesh position={[0, 0.82, 0.14]}>
+        <planeGeometry args={[4.4, 0.85]} />
+        <meshBasicMaterial map={titleTexture} transparent depthWrite={false} />
       </mesh>
-      <mesh position={[0, -0.65, 0.11]}>
-        <planeGeometry args={[2.78, 0.23]} />
-        <meshBasicMaterial map={subtitleTexture} transparent depthWrite={false} depthTest={!active} />
+      <mesh position={[0, -0.92, 0.14]}>
+        <planeGeometry args={[4.4, 0.42]} />
+        <meshBasicMaterial map={subtitleTexture} transparent depthWrite={false} />
       </mesh>
 
-      {active ? <group ref={core} position={[0, 0, 0.16]}>
-        <mesh position={[0, 0, 0.09]} onClick={hit} onPointerOver={lock} onPointerMove={lock} onPointerOut={unlock}>
-          <circleGeometry args={[assist ? 0.34 : 0.3, 32]} />
-          <meshBasicMaterial transparent opacity={0} depthWrite={false} depthTest={false} />
+      {active ? <group ref={core} position={[0, 0, 0.2]}>
+        <mesh position={[0, 0, 0.1]} onClick={hit} onPointerOver={lock} onPointerMove={lock} onPointerOut={unlock}>
+          <circleGeometry args={[assist ? 0.55 : 0.48, 32]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
-        <mesh scale={vulnerable ? 1.18 : 0.92}>
-          <torusGeometry args={[0.29, 0.047, 12, 36]} />
+        <mesh scale={vulnerable ? 1.2 : 0.95}>
+          <torusGeometry args={[0.48, 0.075, 16, 48]} />
           <meshStandardMaterial
             color={vulnerable ? '#fff0a6' : '#d75c45'}
             emissive={vulnerable ? '#ffbf4d' : '#7d2018'}
-            emissiveIntensity={vulnerable ? 3.2 : 0.75}
-            metalness={0.42}
-            roughness={0.25}
+            emissiveIntensity={vulnerable ? 3.6 : 0.8}
+            metalness={0.45}
+            roughness={0.22}
           />
         </mesh>
-        <mesh position={[0, 0, 0.025]}>
-          <circleGeometry args={[0.155, 32]} />
+        <mesh position={[0, 0, 0.03]}>
+          <circleGeometry args={[0.26, 32]} />
           <meshStandardMaterial
             color={vulnerable ? '#fff7ce' : '#5e2726'}
             emissive={vulnerable ? '#ffcf62' : '#7a1616'}
-            emissiveIntensity={vulnerable ? 3.8 : 0.55}
-            roughness={0.2}
+            emissiveIntensity={vulnerable ? 4.2 : 0.6}
+            roughness={0.18}
           />
         </mesh>
-        <mesh rotation={[0, 0, Math.PI / 4]} scale={vulnerable ? 1.1 : 0.82}>
-          <torusGeometry args={[0.41, 0.018, 8, 4]} />
+        <mesh rotation={[0, 0, Math.PI / 4]} scale={vulnerable ? 1.15 : 0.85}>
+          <torusGeometry args={[0.68, 0.03, 8, 4]} />
           <meshBasicMaterial color={vulnerable ? '#fff6c7' : '#9b4339'} transparent opacity={vulnerable ? 0.92 : 0.55} />
         </mesh>
-      </group> : <group position={[0, 0, 0.17]}>
-        <mesh><torusGeometry args={[0.3, 0.035, 10, 32]} /><meshStandardMaterial color={status === 'completed' ? '#f5c978' : '#5e6e73'} emissive={status === 'completed' ? '#a36825' : '#19292e'} emissiveIntensity={status === 'completed' ? 1.4 : 0.25} /></mesh>
-        <mesh><circleGeometry args={[0.11, 24]} /><meshBasicMaterial color={status === 'completed' ? '#ffe0a2' : '#48585d'} /></mesh>
+      </group> : <group position={[0, 0, 0.2]}>
+        <mesh><torusGeometry args={[0.45, 0.05, 12, 36]} /><meshStandardMaterial color={status === 'completed' ? '#f5c978' : '#5e6e73'} emissive={status === 'completed' ? '#a36825' : '#19292e'} emissiveIntensity={status === 'completed' ? 1.5 : 0.25} /></mesh>
+        <mesh><circleGeometry args={[0.18, 28]} /><meshBasicMaterial color={status === 'completed' ? '#ffe0a2' : '#48585d'} /></mesh>
       </group>}
 
-      <mesh position={[-1.13, -1.72, 0]} castShadow>
-        <cylinderGeometry args={[0.07, 0.09, 1.65, 10]} />
-        <meshStandardMaterial color="#3a4145" metalness={0.75} roughness={0.37} />
+      <mesh position={[-1.85, -2.8, 0]} castShadow>
+        <cylinderGeometry args={[0.11, 0.14, 3.4, 12]} />
+        <meshStandardMaterial color="#3a4145" metalness={0.78} roughness={0.35} />
       </mesh>
-      <mesh position={[1.13, -1.72, 0]} castShadow>
-        <cylinderGeometry args={[0.07, 0.09, 1.65, 10]} />
-        <meshStandardMaterial color="#3a4145" metalness={0.75} roughness={0.37} />
+      <mesh position={[1.85, -2.8, 0]} castShadow>
+        <cylinderGeometry args={[0.11, 0.14, 3.4, 12]} />
+        <meshStandardMaterial color="#3a4145" metalness={0.78} roughness={0.35} />
       </mesh>
     </group>
-    {active && (mode === 'shot' || mode === 'reading') && <Sparkles count={90} scale={[3.8, 2.4, 1.4]} size={3.5} speed={1.2} color="#ffb65e" />}
-    {active && showMiss && mode === 'aiming' && <Sparkles key={missPulse} count={24} scale={[2.8, 1.8, 0.8]} size={2.2} speed={1.8} color="#ef4e38" />}
-    {active && <pointLight color={vulnerable ? '#ffd47b' : '#ff5944'} intensity={vulnerable ? 12 : mode === 'aiming' ? 5 : 2.5} distance={12} />}
+    {active && (mode === 'shot' || mode === 'reading') && <Sparkles count={110} scale={[5.5, 3.2, 1.8]} size={4.5} speed={1.2} color="#ffb65e" />}
+    {active && showMiss && mode === 'aiming' && <Sparkles key={missPulse} count={32} scale={[3.8, 2.4, 1.2]} size={2.8} speed={1.8} color="#ef4e38" />}
+    {active && <pointLight color={vulnerable ? '#ffd47b' : '#ff5944'} intensity={vulnerable ? 16 : mode === 'aiming' ? 7 : 3.5} distance={16} />}
   </group>;
 }
 
@@ -1681,7 +2094,7 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
       return;
     }
     if (showFinale) return;
-    const timer = window.setTimeout(() => setShowFinale(true), 7200);
+    const timer = window.setTimeout(() => setShowFinale(true), 12400);
     return () => window.clearTimeout(timer);
   }, [controller.completedCount, mode, showFinale]);
 
@@ -1740,6 +2153,17 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
           <i className="route-menu-status">{complete ? 'UNLOCKED' : active ? 'ON ROUTE' : 'QUICK VIEW'}</i>
         </button>;
       })}
+      <button
+        className={mode === 'finale' ? 'is-active' : ''}
+        type="button"
+        onClick={() => {
+          setMenuOpen(false);
+          controller.openFinale();
+        }}
+      >
+        <span>★ / SUMMIT FINALE</span>
+        <i className="route-menu-status">{mode === 'finale' ? 'ACTIVE' : 'PLAY FINALE'}</i>
+      </button>
     </motion.nav>}</AnimatePresence>
 
     <div className="route-rail" aria-label={'Route progress: ' + controller.completedCount + ' of ' + PORTFOLIO_STOPS.length}>
@@ -1786,7 +2210,7 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
               ? (targetVulnerable ? 'GOLD WINDOW' : 'TRACK CORE') + ' / ' + misses + ' MISS' + (misses === 1 ? '' : 'ES')
               : targetDistance + 'M'}</b>
         </div>
-        {mode === 'target' && <small className="target-prompt">TARGET AHEAD / HOLD YOUR LINE</small>}
+        {mode === 'target' && <small className="target-prompt">TARGET AHEAD / MAINTAIN SPEED / SLOW-MO AT CLOSE RANGE</small>}
         {mode === 'aiming' && <button type="button" aria-label="Fire when the moving core turns gold" onClick={() => shoot(true)}>{targetVulnerable ? 'FIRE NOW / SPACE' : 'WAIT FOR GOLD / SPACE'}</button>}
         {mode === 'aiming' && misses >= 2 && <small className="aim-assist">AIM CALIBRATED</small>}
         {mode === 'aiming' && misses > 0 && <button className="retry-checkpoint" type="button" onClick={controller.restartCheckpoint}>RETRY CHECKPOINT / START OVER</button>}
@@ -1794,7 +2218,7 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
 
       {mode === 'reading' && <SectionPanel controller={controller} />}
 
-      {mode === 'finale' && !showFinale && <motion.p className="finale-sequence" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>SUMMIT REACHED / RIDER DISMOUNTING</motion.p>}
+      {mode === 'finale' && !showFinale && <motion.p className="finale-sequence" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>PARK / DISMOUNT / HELMET OFF / SUNSET OVERLOOK</motion.p>}
 
       {mode === 'finale' && showFinale && <motion.section className="finale-overlay" initial={{ opacity: 0, y: 28 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1.1, ease: [0.16, 1, 0.3, 1] }} aria-labelledby="summit-title">
         <p className="finale-kicker">SUMMIT / JOURNEY COMPLETE</p>
@@ -1812,7 +2236,7 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
     {driving && <p className="ride-instruction">{mode === 'riding'
       ? 'FULL THROTTLE W / ↑ / HOLD MOUSE / A D TO LEAN / S TO BRAKE'
       : mode === 'target'
-        ? 'TARGET AHEAD / BRAKE LATE / MOVE INTO RANGE'
+        ? 'TARGET AHEAD / MAINTAIN SPEED / SLOW-MO AT CLOSE RANGE'
         : mode === 'aiming'
           ? 'TRACK THE MOVING CORE / GOLD = FIRE / RED = WAIT'
           : 'FINAL ASCENT / REACH THE OVERLOOK TO COMPLETE THE JOURNEY'}</p>}

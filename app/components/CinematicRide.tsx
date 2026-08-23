@@ -29,6 +29,7 @@ type RideController = {
   begin: () => void;
   shoot: (confirmed?: boolean) => void;
   continueRide: () => void;
+  bypassTarget: () => void;
   restartCheckpoint: () => void;
   openSection: (index: number) => void;
   openFinale: () => void;
@@ -53,6 +54,7 @@ type RideController = {
   rideReset: number;
   checkpointReset: number;
   activeIndex: number;
+  completedStops: number[];
   completedCount: number;
   activeStop: PortfolioStop | null;
   panelStop: PortfolioStop | null;
@@ -280,12 +282,16 @@ function useRideController(): RideController {
   const [checkpointReset, setCheckpointReset] = useState(0);
   const [mute, setMute] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [completedStops, setCompletedStops] = useState<number[]>([]);
+  const [targetQueue, setTargetQueue] = useState<number[]>([0, 1, 2, 3, 4, 5]);
   const [panelIndex, setPanelIndex] = useState<number | null>(null);
   const [previewing, setPreviewing] = useState(false);
 
   const muteRef = useRef(false);
   const modeRef = useRef<RideState>('intro');
   const activeIndexRef = useRef(0);
+  const completedStopsRef = useRef<number[]>([]);
+  const targetQueueRef = useRef<number[]>([0, 1, 2, 3, 4, 5]);
   const previewingRef = useRef(false);
   const returnModeRef = useRef<RideState>('riding');
   const returnSpeedRef = useRef(1);
@@ -369,43 +375,48 @@ function useRideController(): RideController {
   }
 
   function setTargetVulnerable(value: boolean) {
-    if (targetVulnerableRef.current === value) return;
     targetVulnerableRef.current = value;
     setTargetVulnerableState(value);
-    if (value) setMissMessage('');
   }
 
-  function sound(frequency: number, duration: number, type: OscillatorType = 'sine', volume = 0.028) {
-    if (muteRef.current) return;
+  function sound(freq: number, duration: number, type: OscillatorType = 'sine', volume = 0.035) {
+    if (muteRef.current || typeof window === 'undefined') return;
     const context = getAudioContext();
-    if (!context) return;
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.type = type;
-    oscillator.frequency.setValueAtTime(frequency, context.currentTime);
-    gain.gain.setValueAtTime(volume, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + duration);
-    oscillator.connect(gain).connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime + duration);
+    if (!context || context.state === 'closed') return;
+    try {
+      const osc = context.createOscillator();
+      const gain = context.createGain();
+      const now = context.currentTime;
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, now);
+      gain.gain.setValueAtTime(volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      osc.connect(gain);
+      gain.connect(context.destination);
+      osc.start(now);
+      osc.stop(now + duration);
+    } catch {
+      // Audio autoplay policy fallback
+    }
   }
 
   function killTimelines() {
-    mainTimeline.current?.kill();
+    if (mainTimeline.current) {
+      mainTimeline.current.kill();
+      mainTimeline.current = null;
+    }
   }
 
-  function resetChallenge(nextDistance: number) {
+  function resetChallenge(distance: number) {
+    targetDistanceRef.current = distance;
+    reportedDistance.current = Math.round(Math.abs(distance));
     reportedApproach.current = 0;
-    reportedDistance.current = Math.round(Math.abs(nextDistance));
-    targetDistanceRef.current = nextDistance;
-    lastAttemptAt.current = 0;
+    setTargetDistance(Math.round(Math.abs(distance)));
+    setTargetProgress(0);
     setAimLocked(false);
     setTargetVulnerable(false);
     setMisses(0);
-    setMissPulse(0);
     setMissMessage('');
-    setTargetProgress(0);
-    setTargetDistance(Math.round(Math.abs(nextDistance)));
   }
 
   function reportApproach(stageIndex: number, value: number, distance: number) {
@@ -444,6 +455,11 @@ function useRideController(): RideController {
 
   function begin() {
     killTimelines();
+    const initialQueue = [0, 1, 2, 3, 4, 5];
+    targetQueueRef.current = initialQueue;
+    setTargetQueue(initialQueue);
+    completedStopsRef.current = [];
+    setCompletedStops([]);
     activeIndexRef.current = 0;
     setActiveIndex(0);
     setPanelIndex(null);
@@ -477,19 +493,56 @@ function useRideController(): RideController {
 
   function registerMiss(message: string) {
     setMissMessage(message);
-    setMisses((value) => value + 1);
+    const nextMisses = misses + 1;
+    setMisses(nextMisses);
     setMissPulse((value) => value + 1);
     sound(92, 0.14, 'square', 0.045);
+    if (nextMisses >= 3) {
+      bypassTarget();
+    }
+  }
+
+  function bypassTarget() {
+    if (modeRef.current !== 'aiming' && modeRef.current !== 'target') return;
+    killTimelines();
+    setAimLocked(false);
+    setTargetVulnerable(false);
+    setMisses(0);
+
+    const currentQueue = targetQueueRef.current;
+    if (currentQueue.length === 0) return;
+    const bypassedIndex = currentQueue[0];
+
+    // Move missed target to the end of the queue so it reappears after other targets
+    const nextQueue = [...currentQueue.slice(1), bypassedIndex];
+    targetQueueRef.current = nextQueue;
+    setTargetQueue(nextQueue);
+
+    const nextActiveIndex = nextQueue[0];
+    setActiveIndex(nextActiveIndex);
+    activeIndexRef.current = nextActiveIndex;
+
+    setMissMessage('TARGET MISSED — ADVANCING FORWARD');
+    sound(115, 0.22, 'square', 0.05);
+
+    transition('riding');
+    setSpeed(1);
+
+    const nextStop = PORTFOLIO_STOPS[nextActiveIndex];
+    if (nextStop) {
+      const dist = Math.abs(nextStop.distance - PORTFOLIO_STOPS[bypassedIndex].distance);
+      resetChallenge(dist > 0 ? dist : 60);
+    }
   }
 
   function shoot(confirmed = false) {
-    if (modeRef.current !== 'aiming' || activeIndexRef.current >= PORTFOLIO_STOPS.length) return;
+    if (modeRef.current !== 'aiming' || targetQueueRef.current.length === 0) return;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     if (now - lastAttemptAt.current < 350) return;
     lastAttemptAt.current = now;
 
     const distance = Math.abs(targetDistanceRef.current);
-    if (distance > TARGET_LOCK_DISTANCE + 2.5) {
+    if (distance > TARGET_LOCK_DISTANCE + 3.0) {
       registerMiss('OUT OF RANGE - HOLD YOUR LINE');
       return;
     }
@@ -503,7 +556,7 @@ function useRideController(): RideController {
     }
 
     killTimelines();
-    const hitIndex = activeIndexRef.current;
+    const hitIndex = targetQueueRef.current[0];
     setPanelIndex(hitIndex);
     previewingRef.current = false;
     setPreviewing(false);
@@ -537,6 +590,7 @@ function useRideController(): RideController {
     setAimLocked(false);
     setTargetVulnerable(false);
     setMissMessage('');
+    setMisses(0);
 
     if (previewingRef.current) {
       const returnMode = returnModeRef.current;
@@ -548,20 +602,38 @@ function useRideController(): RideController {
       return;
     }
 
-    const currentIndex = activeIndexRef.current;
-    if (currentIndex >= PORTFOLIO_STOPS.length) return;
-    const nextIndex = currentIndex + 1;
-    activeIndexRef.current = nextIndex;
-    setActiveIndex(nextIndex);
+    const currentQueue = targetQueueRef.current;
+    if (currentQueue.length === 0) return;
+    const hitIndex = currentQueue[0];
+
+    // Mark as completed
+    if (!completedStopsRef.current.includes(hitIndex)) {
+      const nextCompleted = [...completedStopsRef.current, hitIndex];
+      completedStopsRef.current = nextCompleted;
+      setCompletedStops(nextCompleted);
+    }
+
+    // Remove from targetQueue
+    const nextQueue = currentQueue.slice(1);
+    targetQueueRef.current = nextQueue;
+    setTargetQueue(nextQueue);
     setPanelIndex(null);
 
-    if (nextIndex < PORTFOLIO_STOPS.length) {
-      const distance = PORTFOLIO_STOPS[nextIndex].distance - PORTFOLIO_STOPS[currentIndex].distance;
-      resetChallenge(distance);
-      transition('riding');
-    } else {
-      resetChallenge(SUMMIT_DISTANCE - PORTFOLIO_STOPS[currentIndex].distance);
+    if (nextQueue.length === 0) {
+      // All 6 targets completed! Advance to summit!
+      setActiveIndex(PORTFOLIO_STOPS.length);
+      activeIndexRef.current = PORTFOLIO_STOPS.length;
+      resetChallenge(SUMMIT_DISTANCE - PORTFOLIO_STOPS[hitIndex].distance);
       transition('summit');
+      sound(132, 0.4, 'sawtooth', 0.052);
+    } else {
+      const nextIndex = nextQueue[0];
+      setActiveIndex(nextIndex);
+      activeIndexRef.current = nextIndex;
+      const distance = Math.abs(PORTFOLIO_STOPS[nextIndex].distance - PORTFOLIO_STOPS[hitIndex].distance);
+      resetChallenge(distance > 0 ? distance : 60);
+      transition('riding');
+      sound(105, 0.4, 'sawtooth', 0.052);
     }
 
     const driver = { value: 0.2 };
@@ -573,18 +645,11 @@ function useRideController(): RideController {
       ease: 'power2.inOut',
       onUpdate: () => setSpeed(driver.value),
     });
-    sound(nextIndex < PORTFOLIO_STOPS.length ? 105 : 132, 0.4, 'sawtooth', 0.052);
   }
 
   function restartCheckpoint() {
-    if (activeIndexRef.current >= PORTFOLIO_STOPS.length) return;
-    if (modeRef.current !== 'target' && modeRef.current !== 'aiming') return;
-    killTimelines();
-    resetChallenge(30);
-    setCheckpointReset((value) => value + 1);
-    transition('target');
-    setSpeed(1);
-    sound(240, 0.24, 'square', 0.04);
+    // Keep function signature for compatibility, but forward to bypass
+    bypassTarget();
   }
 
   function openSection(index: number) {
@@ -669,6 +734,7 @@ function useRideController(): RideController {
     begin,
     shoot,
     continueRide,
+    bypassTarget,
     restartCheckpoint,
     openSection,
     openFinale,
@@ -693,7 +759,8 @@ function useRideController(): RideController {
     rideReset,
     checkpointReset,
     activeIndex,
-    completedCount: Math.min(activeIndex, PORTFOLIO_STOPS.length),
+    completedStops,
+    completedCount: completedStops.length,
     activeStop: PORTFOLIO_STOPS[activeIndex] ?? null,
     panelStop: panelIndex === null ? null : PORTFOLIO_STOPS[panelIndex],
     previewing,
@@ -1542,6 +1609,21 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       const distanceToTarget = activeStop.distance - runtime.progress * ROAD_LENGTH;
       const approach = THREE.MathUtils.clamp((32 - distanceToTarget) / 22, 0, 1);
       controller.reportApproach(controller.activeIndex, approach, distanceToTarget);
+
+      // If the bike drives past the target without hitting it, advance forward smoothly without rewinding
+      if (controller.mode === 'aiming' && distanceToTarget < -4.5) {
+        controller.bypassTarget();
+      }
+    }
+
+    // Seamless forward loop along the scenic mountain route if any missed targets remain to be completed
+    if (
+      runtime.progress >= 0.88
+      && controller.completedCount < PORTFOLIO_STOPS.length
+      && controller.mode !== 'summit'
+      && controller.mode !== 'finale'
+    ) {
+      runtime.progress = RIDE_START_PROGRESS + 0.02;
     }
 
     if (
@@ -2009,7 +2091,7 @@ function Scene({ controller, drive, lowQuality }: { controller: RideController; 
     />
     <RideRig controller={controller} drive={drive} />
     {PORTFOLIO_STOPS.map((portfolioStop, index) => {
-      const status: TargetStatus = index < controller.completedCount
+      const status: TargetStatus = controller.completedStops.includes(index)
         ? 'completed'
         : index === controller.activeIndex
           ? 'active'
@@ -2038,84 +2120,66 @@ function Scene({ controller, drive, lowQuality }: { controller: RideController; 
 function SectionPanel({ controller }: { controller: RideController }) {
   const portfolioStop = controller.panelStop;
   if (!portfolioStop) return null;
-  const actionLabel = controller.previewing
-    ? 'RETURN TO RIDE'
-    : portfolioStop.id === 'contact'
-      ? 'RIDE TO SUMMIT'
-      : 'CONTINUE RIDE';
 
-  return <motion.section
-    className="skills-overlay"
-    initial={{ opacity: 0, y: 26 }}
-    animate={{ opacity: 1, y: 0 }}
-    exit={{ opacity: 0, y: 18 }}
-    transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-    aria-labelledby={'section-' + portfolioStop.id}
+  return <motion.article
+    className="detail-panel"
+    initial={{ opacity: 0, y: 18, scale: 0.985 }}
+    animate={{ opacity: 1, y: 0, scale: 1 }}
+    exit={{ opacity: 0, y: 14, scale: 0.985 }}
+    transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+    aria-labelledby="panel-heading"
   >
-    <div className="skills-heading">
-      <p>{portfolioStop.number} / {controller.previewing ? 'DIRECT ACCESS' : portfolioStop.eyebrow}</p>
-      <h2 id={'section-' + portfolioStop.id}>{portfolioStop.heading[0]}<br /><em>{portfolioStop.heading[1]}</em></h2>
-      <span>{controller.previewing ? 'Quick view - route progress is unchanged' : 'World speed reduced to 20%'}</span>
-      <p className="section-note">{portfolioStop.note}</p>
+    <div className="panel-header">
+      <div className="panel-kicker">
+        <span>TARGET UNLOCKED / {portfolioStop.number}</span>
+        <b>{portfolioStop.eyebrow}</b>
+      </div>
+      <button className="panel-close" type="button" onClick={controller.continueRide} aria-label="Close dossier">X</button>
     </div>
-    <div className="skills-columns">
-      {portfolioStop.groups.map((group) => <article key={group.label}>
-        <b>{group.label}</b>
-        <p>{group.lines.map((line, index) => <span key={line}>{line}{index < group.lines.length - 1 && <br />}</span>)}</p>
-      </article>)}
+
+    <div className="panel-title-block">
+      <p className="panel-pretitle">PORTFOLIO DOSSIER</p>
+      <h2 id="panel-heading">{portfolioStop.heading[0]}<br /><em>{portfolioStop.heading[1]}</em></h2>
     </div>
-    <div className="skills-footer">
-      <span>{controller.previewing ? 'MENU VIEW / NO CHECKPOINT SKIPPED' : portfolioStop.id === 'contact' ? 'ALL CHECKPOINTS COMPLETE' : 'NEXT TARGET IS WAITING'}</span>
-      <button type="button" onClick={controller.continueRide}>{actionLabel} <b>↗</b></button>
+
+    <div className="panel-grid">
+      {portfolioStop.groups.map((group) => (
+        <section key={group.label} className="panel-group" aria-label={group.label}>
+          <h3>{group.label}</h3>
+          <ul>{group.lines.map((line) => <li key={line}>{line}</li>)}</ul>
+        </section>
+      ))}
     </div>
-  </motion.section>;
+
+    <div className="panel-footer">
+      <p className="panel-note">{portfolioStop.note}</p>
+      <button className="panel-cta" type="button" onClick={controller.continueRide}>
+        {controller.previewing ? 'RESUME ROUTE ↗' : 'CONTINUE RIDE ↗'}
+      </button>
+    </div>
+  </motion.article>;
 }
 
 function Hud({ controller, drive }: { controller: RideController; drive: DriveRef }) {
-  const {
-    mode,
-    countdown,
-    vehicleSpeed,
-    targetDistance,
-    aimLocked,
-    targetVulnerable,
-    misses,
-    missMessage,
-    activeStop,
-    begin,
-    shoot,
-    mute,
-    setMute,
-  } = controller;
+  const { mode, countdown, vehicleSpeed, targetDistance, misses, aimLocked, targetVulnerable, mute, setMute, activeStop, begin, shoot } = controller;
   const [menuOpen, setMenuOpen] = useState(false);
   const [showFinale, setShowFinale] = useState(false);
 
   useEffect(() => {
     if (mode !== 'finale') {
-      if (controller.completedCount < PORTFOLIO_STOPS.length) setShowFinale(false);
+      setShowFinale(false);
       return;
     }
-    if (showFinale) return;
-    const timer = window.setTimeout(() => setShowFinale(true), 12400);
+    const timer = window.setTimeout(() => setShowFinale(true), 11500);
     return () => window.clearTimeout(timer);
-  }, [controller.completedCount, mode, showFinale]);
+  }, [mode]);
 
-  const playState = mode === 'finale'
-    ? 'SUMMIT / PARKED'
-    : mode === 'summit'
-      ? 'RIDE / FINAL ASCENT'
-      : mode === 'reading'
-        ? 'SLOW / 0.2X'
-        : vehicleSpeed > 0.72
-          ? 'RIDE / REDLINE'
-          : mode === 'riding' || mode === 'target' || mode === 'aiming'
-            ? 'RIDE / LIVE'
-            : 'SYSTEM / READY';
   const driving = mode === 'riding' || mode === 'target' || mode === 'aiming' || mode === 'summit';
+  const playState = mode === 'intro' ? 'READY' : mode === 'countdown' ? 'START' : mode === 'finale' ? 'FINALE' : mode === 'summit' ? 'SUMMIT' : mode === 'reading' ? 'READING' : mode === 'shot' ? 'HIT' : 'CRUISE';
   const targetStatus = mode === 'shot'
-    ? 'HIT CONFIRMED'
+    ? 'TARGET UNLOCKED'
     : mode === 'aiming'
-      ? missMessage || (targetVulnerable ? 'CORE OPEN' : 'SHIELD CYCLING')
+      ? (targetVulnerable ? 'VULNERABLE — FIRE SIDEARM' : 'SHIELD ROTATING — HOLD AIM')
       : 'TARGET DETECTED';
   const routeLabel = mode === 'finale'
     ? 'COMPLETE'
@@ -2140,7 +2204,7 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
     <AnimatePresence>{menuOpen && <motion.nav className="route-menu" initial={{ opacity: 0, y: -14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -14 }} aria-label="Portfolio navigation">
       <div><span>DIRECT ACCESS / {controller.completedCount} OF {PORTFOLIO_STOPS.length}</span><button type="button" onClick={() => setMenuOpen(false)} aria-label="Close menu">x</button></div>
       {PORTFOLIO_STOPS.map((portfolioStop, index) => {
-        const complete = index < controller.completedCount;
+        const complete = controller.completedStops.includes(index);
         const active = index === controller.activeIndex && mode !== 'summit' && mode !== 'finale';
         return <button
           key={portfolioStop.id}
@@ -2215,7 +2279,6 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
         {mode === 'target' && <small className="target-prompt">TARGET AHEAD / MAINTAIN SPEED / SLOW-MO AT CLOSE RANGE</small>}
         {mode === 'aiming' && <button type="button" aria-label="Fire when the moving core turns gold" onClick={() => shoot(true)}>{targetVulnerable ? 'FIRE NOW / SPACE' : 'WAIT FOR GOLD / SPACE'}</button>}
         {mode === 'aiming' && misses >= 2 && <small className="aim-assist">AIM CALIBRATED</small>}
-        {mode === 'aiming' && misses > 0 && <button className="retry-checkpoint" type="button" onClick={controller.restartCheckpoint}>RETRY CHECKPOINT / START OVER</button>}
       </motion.section>}
 
       {mode === 'reading' && <SectionPanel controller={controller} />}

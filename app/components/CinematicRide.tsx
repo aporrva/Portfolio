@@ -240,7 +240,7 @@ stop(
       links: [{ label: 'VISIT PRITHU.EARTH', href: 'https://prithu.earth/' }],
     },
     {
-      label: 'FREELANCE / SEP 2025-PRESENT',
+      label: 'FREELANCE / SEP 2025 - OCT 2025',
       lines: ['Worked in Ethereal Designs'],
       links: [{ label: 'VISIT ETHEREALDESIGN.IO', href: 'https://etherealdesign.io/' }],
     },

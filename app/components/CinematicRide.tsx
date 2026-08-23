@@ -160,38 +160,103 @@ function getEffectiveStop(index: number, distances?: number[]): PortfolioStop | 
 }
 
 const PORTFOLIO_STOPS: PortfolioStop[] = [
-  stop('skills', 'SKILLS', '01', 90, 1, 'UNLOCK THE TOOLKIT', 'SKILLS UNLOCKED', ['THE TOOLKIT', 'BEHIND THE RIDE.'], [
-    { label: 'FRONTEND', lines: ['React', 'Next.js', 'TypeScript'] },
-    { label: '3D / MOTION', lines: ['Three.js', 'React Three Fiber', 'GSAP'] },
-    { label: 'BACKEND', lines: ['Node.js', 'APIs', 'Databases'] },
-  ], 'A practical stack for expressive, production-ready digital products.'),
-  stop('about', 'ABOUT', '02', 180, -1, 'MEET THE RIDER', 'RIDER PROFILE', ['DESIGN THINKING.', 'ENGINEERING DRIVE.'], [
-    { label: 'PROFILE', lines: ['Full-stack developer', 'Creative technologist'] },
-    { label: 'APPROACH', lines: ['Design X engineering', 'Story-led interaction'] },
-    { label: 'FOCUS', lines: ['Useful products', 'Memorable interfaces'] },
-  ], 'I turn ambitious ideas into clear, usable experiences with personality.'),
-  stop('experience', 'EXPERIENCE', '03', 270, 1, 'TRACE THE JOURNEY', 'EXPERIENCE UNLOCKED', ['BUILT THROUGH', 'REAL DELIVERY.'], [
-    { label: 'ENGINEERING', lines: ['Frontend systems', 'Typed architecture'] },
-    { label: 'PRODUCT', lines: ['Full-stack workflows', 'API-driven applications'] },
-    { label: 'DELIVERY', lines: ['Concept to launch', 'Performance and polish'] },
-  ], 'Hands-on experience across product thinking, implementation, and refinement.'),
-  stop('projects', 'PROJECTS', '04', 360, -1, 'OPEN THE GARAGE', 'PROJECT DATABASE', ['SELECTED WORK.', 'MADE TO MOVE.'], [
-    { label: 'IMMERSIVE WEB', lines: ['3D Ride Portfolio', 'Three.js experience'] },
-    { label: 'PRODUCT BUILDS', lines: ['Responsive applications', 'End-to-end workflows'] },
-    { label: 'INTERACTION', lines: ['Motion systems', 'Accessible interfaces'] },
-  ], 'Projects where interaction, technology, and a strong visual point of view meet.'),
-  stop('resume', 'RESUME', '05', 450, 1, 'VIEW THE RECORD', 'RESUME UNLOCKED', ['THE ROUTE.', 'AT A GLANCE.'], [
-    { label: 'CORE', lines: ['React / TypeScript', 'Node.js / APIs'] },
-    { label: 'CREATIVE', lines: ['Three.js / WebGL', 'GSAP / Motion'] },
-    { label: 'PRACTICE', lines: ['Databases / Accessibility', 'Performance'] },
-  ], 'A compact view of the capabilities behind the work.'),
-  stop('contact', 'CONTACT', '06', 540, -1, 'START A CONVERSATION', 'FINAL CHECKPOINT', ["LET'S BUILD", "WHAT'S NEXT."], [
-    { label: 'COLLABORATE', lines: ['Product experiences', 'Interactive platforms'] },
-    { label: 'CONNECT', lines: ['Email', 'LinkedIn'] },
-    { label: 'FOLLOW', lines: ['GitHub', 'Selected work'] },
-  ], 'The road continues with the right people and the right idea.'),
+  stop(
+    'about',
+    'ABOUT',
+    '01',
+    90,
+    -1,
+    'MEET THE RIDER',
+    'RIDER PROFILE',
+    ['DESIGN THINKING.', 'ENGINEERING DRIVE.'],
+    [
+      { label: 'PROFILE', lines: ['Full-stack developer', 'Creative technologist'] },
+      { label: 'APPROACH', lines: ['Design X engineering', 'Story-led interaction'] },
+      { label: 'FOCUS', lines: ['Useful products', 'Memorable interfaces'] },
+    ],
+    'I turn ambitious ideas into clear, usable experiences with personality.'
+  ),
+  stop(
+    'skills',
+    'SKILLS',
+    '02',
+    180,
+    1,
+    'UNLOCK THE TOOLKIT',
+    'SKILLS UNLOCKED',
+    ['THE TOOLKIT', 'BEHIND THE RIDE.'],
+    [
+      { label: 'FRONTEND', lines: ['React', 'Next.js', 'TypeScript'] },
+      { label: '3D / MOTION', lines: ['Three.js', 'React Three Fiber', 'GSAP'] },
+      { label: 'BACKEND', lines: ['Node.js', 'APIs', 'Databases'] },
+    ],
+    'A practical stack for expressive, production-ready digital products.'
+  ),
+  stop(
+    'experience',
+    'EXPERIENCE',
+    '03',
+    270,
+    -1,
+    'TRACE THE JOURNEY',
+    'EXPERIENCE UNLOCKED',
+    ['BUILT THROUGH', 'REAL DELIVERY.'],
+    [
+      { label: 'ENGINEERING', lines: ['Frontend systems', 'Typed architecture'] },
+      { label: 'PRODUCT', lines: ['Full-stack workflows', 'API-driven applications'] },
+      { label: 'DELIVERY', lines: ['Concept to launch', 'Performance and polish'] },
+    ],
+    'Hands-on experience across product thinking, implementation, and refinement.'
+  ),
+  stop(
+    'projects',
+    'PROJECTS',
+    '04',
+    360,
+    1,
+    'OPEN THE GARAGE',
+    'PROJECT DATABASE',
+    ['SELECTED WORK.', 'MADE TO MOVE.'],
+    [
+      { label: 'IMMERSIVE WEB', lines: ['3D Ride Portfolio', 'Three.js experience'] },
+      { label: 'PRODUCT BUILDS', lines: ['Responsive applications', 'End-to-end workflows'] },
+      { label: 'INTERACTION', lines: ['Motion systems', 'Accessible interfaces'] },
+    ],
+    'Projects where interaction, technology, and a strong visual point of view meet.'
+  ),
+  stop(
+    'resume',
+    'RESUME',
+    '05',
+    450,
+    -1,
+    'VIEW THE RECORD',
+    'RESUME UNLOCKED',
+    ['THE ROUTE.', 'AT A GLANCE.'],
+    [
+      { label: 'CORE', lines: ['React / TypeScript', 'Node.js / APIs'] },
+      { label: 'CREATIVE', lines: ['Three.js / WebGL', 'GSAP / Motion'] },
+      { label: 'PRACTICE', lines: ['Databases / Accessibility', 'Performance'] },
+    ],
+    'A compact view of the capabilities behind the work.'
+  ),
+  stop(
+    'contact',
+    'CONTACT',
+    '06',
+    540,
+    1,
+    'START A CONVERSATION',
+    'FINAL CHECKPOINT',
+    ["LET'S BUILD", "WHAT'S NEXT."],
+    [
+      { label: 'COLLABORATE', lines: ['Product experiences', 'Interactive platforms'] },
+      { label: 'CONNECT', lines: ['Email', 'LinkedIn'] },
+      { label: 'FOLLOW', lines: ['GitHub', 'Selected work'] },
+    ],
+    'The road continues with the right people and the right idea.'
+  ),
 ];
-
 function createDriveRuntime(): DriveRuntime {
   return {
     progress: RIDE_START_PROGRESS,
@@ -219,8 +284,8 @@ function createDriveRuntime(): DriveRuntime {
   };
 }
 
-function createRoadGeometry(width: number, elevation: number, start = 0, end = 1, widenAtSummit = false) {
-  const segments = Math.max(32, Math.ceil((end - start) * ROAD_LENGTH * 0.8));
+function createRoadGeometry(width: number, elevation: number, start = 0, end = 1, widenAtSummit = false, depthSkirt = 0.85) {
+  const segments = Math.max(48, Math.ceil((end - start) * ROAD_LENGTH * 0.9));
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
@@ -233,15 +298,37 @@ function createRoadGeometry(width: number, elevation: number, start = 0, end = 1
     const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
     const summitWiden = widenAtSummit ? THREE.MathUtils.smoothstep(progress, 0.885, SUMMIT_PROGRESS) : 0;
     const localWidth = THREE.MathUtils.lerp(width, Math.max(width, 10), summitWiden);
-    const left = point.clone().addScaledVector(side, localWidth / 2);
-    const right = point.clone().addScaledVector(side, -localWidth / 2);
-    positions.push(left.x, left.y + elevation, left.z, right.x, right.y + elevation, right.z);
-    uvs.push(0, fraction * Math.max(18, ROAD_LENGTH / 5), 1, fraction * Math.max(18, ROAD_LENGTH / 5));
+
+    // 4 points per cross section for solid 3D geometry: Left bottom skirt, Left road deck, Right road deck, Right bottom skirt
+    const pLeftSkirt = point.clone().addScaledVector(side, localWidth / 2 + 0.35);
+    pLeftSkirt.y += elevation - depthSkirt;
+    const pLeftTop = point.clone().addScaledVector(side, localWidth / 2);
+    pLeftTop.y += elevation;
+    const pRightTop = point.clone().addScaledVector(side, -localWidth / 2);
+    pRightTop.y += elevation;
+    const pRightSkirt = point.clone().addScaledVector(side, -localWidth / 2 - 0.35);
+    pRightSkirt.y += elevation - depthSkirt;
+
+    positions.push(
+      pLeftSkirt.x, pLeftSkirt.y, pLeftSkirt.z,
+      pLeftTop.x, pLeftTop.y, pLeftTop.z,
+      pRightTop.x, pRightTop.y, pRightTop.z,
+      pRightSkirt.x, pRightSkirt.y, pRightSkirt.z,
+    );
+
+    const uvV = fraction * Math.max(18, ROAD_LENGTH / 4.5);
+    uvs.push(0, uvV, 0.15, uvV, 0.85, uvV, 1, uvV);
   }
 
   for (let index = 0; index < segments; index += 1) {
-    const offset = index * 2;
-    indices.push(offset, offset + 1, offset + 2, offset + 1, offset + 3, offset + 2);
+    const base = index * 4;
+    const next = (index + 1) * 4;
+    // Left side skirt quad
+    indices.push(base, next, base + 1, next, next + 1, base + 1);
+    // Road top deck surface quad
+    indices.push(base + 1, next + 1, base + 2, next + 1, next + 2, base + 2);
+    // Right side skirt quad
+    indices.push(base + 2, next + 2, base + 3, next + 2, next + 3, base + 3);
   }
 
   const geometry = new THREE.BufferGeometry();
@@ -252,7 +339,7 @@ function createRoadGeometry(width: number, elevation: number, start = 0, end = 1
   return geometry;
 }
 
-function makeTerrain(width: number, depth: number, segmentsX: number, segmentsZ: number, amplitude: number, centerZ = 220) {
+function makeTerrain(width: number, depth: number, segmentsX: number, segmentsZ: number, amplitude: number, centerZ = 450) {
   const geometry = new THREE.PlaneGeometry(width, depth, segmentsX, segmentsZ);
   geometry.rotateX(-Math.PI / 2);
   geometry.translate(0, 0, centerZ);
@@ -261,10 +348,10 @@ function makeTerrain(width: number, depth: number, segmentsX: number, segmentsZ:
   for (let index = 0; index < position.count; index += 1) {
     const x = position.getX(index);
     const z = position.getZ(index);
-    const broad = Math.sin(x * 0.028 + z * 0.015) * amplitude * 0.42;
-    const ridges = Math.sin(x * 0.082 - z * 0.034) * amplitude * 0.2;
-    const detail = Math.sin(x * 0.25 + z * 0.11) * amplitude * 0.04;
-    position.setY(index, broad + ridges + detail - 7.5);
+    const broad = Math.sin(x * 0.022 + z * 0.012) * amplitude * 0.42;
+    const ridges = Math.sin(x * 0.065 - z * 0.028) * amplitude * 0.22;
+    const detail = Math.sin(x * 0.18 + z * 0.08) * amplitude * 0.05;
+    position.setY(index, broad + ridges + detail - 8.5);
   }
   geometry.computeVertexNormals();
   return geometry;
@@ -831,10 +918,14 @@ function Road() {
   }, []);
 
   return <group>
-    <mesh geometry={shoulder} receiveShadow><meshStandardMaterial color="#24272a" roughness={0.9} polygonOffset polygonOffsetFactor={1} polygonOffsetUnits={1} /></mesh>
-    <mesh geometry={road} receiveShadow><meshStandardMaterial color="#24272a" roughness={0.86} metalness={0.02} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} /></mesh>
-    {lines.map(({ point, quaternion }, index) => <mesh key={index} position={[point.x, point.y + 0.105, point.z]} quaternion={quaternion} receiveShadow>
-      <boxGeometry args={[0.16, 0.016, 2.35]} /><meshStandardMaterial color="#e6c888" emissive="#64461e" emissiveIntensity={0.14} roughness={0.6} />
+    <mesh geometry={shoulder} receiveShadow>
+      <meshStandardMaterial color="#2d3033" roughness={0.94} depthWrite={true} depthTest={true} />
+    </mesh>
+    <mesh geometry={road} receiveShadow>
+      <meshStandardMaterial color="#1f2225" roughness={0.84} metalness={0.06} depthWrite={true} depthTest={true} />
+    </mesh>
+    {lines.map(({ point, quaternion }, index) => <mesh key={index} position={[point.x, point.y + 0.115, point.z]} quaternion={quaternion} receiveShadow>
+      <boxGeometry args={[0.16, 0.02, 2.35]} /><meshStandardMaterial color="#e6c888" emissive="#64461e" emissiveIntensity={0.14} roughness={0.6} />
     </mesh>)}
     {rails.map((curve, index) => <mesh key={index} castShadow receiveShadow>
       <tubeGeometry args={[curve, 320, 0.045, 8, false]} />
@@ -848,9 +939,9 @@ function Road() {
 }
 
 function Terrain() {
-  const valley = useMemo(() => makeTerrain(220, 760, 44, 100, 18, 220), []);
-  const roadMountain = useMemo(() => createRoadGeometry(92, -1.35), []);
-  const snowShelf = useMemo(() => createRoadGeometry(76, -0.9, 0.67, 1), []);
+  const valley = useMemo(() => makeTerrain(480, 1150, 60, 150, 26, 450), []);
+  const roadMountain = useMemo(() => createRoadGeometry(110, -1.8, 0, 1, false, 4.5), []);
+  const snowShelf = useMemo(() => createRoadGeometry(90, -1.2, 0.62, 1, true, 3.8), []);
   const rocks = useMemo(() => Array.from({ length: 96 }, (_, index) => {
     const progress = 0.025 + (index / 96) * 0.93;
     const point = roadCurve.getPointAt(progress);
@@ -939,15 +1030,15 @@ function TreeField({ count = 120 }: { count?: number }) {
 
 function Atmosphere() {
   const clouds = useMemo(() => [
-    [-22, 11, -10, 4.2], [18, 15, 74, 5.1], [-19, 18, 175, 4.7], [17, 22, 282, 5.5],
-    [-28, 25, 365, 6.2], [22, 27, 450, 7.1], [-12, 24, 520, 5.8],
+    [-75, 48, 20, 5.5], [82, 54, 130, 6.2], [-90, 58, 260, 6.0], [95, 62, 390, 6.8],
+    [-105, 66, 520, 7.5], [90, 70, 660, 8.0], [-85, 74, 800, 7.6], [75, 78, 910, 8.5],
   ] as const, []);
   return <group>
-    <mesh position={[-24, 54, 585]}><sphereGeometry args={[8.5, 32, 24]} /><meshBasicMaterial color="#ffc578" toneMapped={false} /></mesh>
-    <mesh position={[-24, 54, 585]} scale={1.72}><sphereGeometry args={[8.5, 32, 24]} /><meshBasicMaterial color="#ff9c63" transparent opacity={0.055} depthWrite={false} /></mesh>
+    <mesh position={[-24, 75, 920]}><sphereGeometry args={[14, 32, 24]} /><meshBasicMaterial color="#ffc578" toneMapped={false} /></mesh>
+    <mesh position={[-24, 75, 920]} scale={1.8}><sphereGeometry args={[14, 32, 24]} /><meshBasicMaterial color="#ff9c63" transparent opacity={0.06} depthWrite={false} /></mesh>
     {clouds.map(([x, y, z, scale], index) => <group key={index} position={[x, y, z]} scale={scale}>
-      <mesh scale={[1.1, 0.23, 0.34]}><sphereGeometry args={[1, 20, 12]} /><meshStandardMaterial color="#d9e2df" transparent opacity={0.14} roughness={1} depthWrite={false} /></mesh>
-      <mesh position={[0.7, 0.14, 0.1]} scale={[0.72, 0.19, 0.26]}><sphereGeometry args={[1, 20, 12]} /><meshStandardMaterial color="#e9e4d8" transparent opacity={0.11} roughness={1} depthWrite={false} /></mesh>
+      <mesh scale={[1.2, 0.28, 0.42]}><sphereGeometry args={[1, 20, 12]} /><meshStandardMaterial color="#d9e2df" transparent opacity={0.14} roughness={1} depthWrite={false} /></mesh>
+      <mesh position={[0.7, 0.14, 0.1]} scale={[0.82, 0.22, 0.32]}><sphereGeometry args={[1, 20, 12]} /><meshStandardMaterial color="#e9e4d8" transparent opacity={0.11} roughness={1} depthWrite={false} /></mesh>
     </group>)}
   </group>;
 }

@@ -264,12 +264,12 @@ stop(
   [
     {
       label: 'PRITHU.EARTH',
-      lines: ['Climate-tech company website', 'Sole end-to-end website build', 'High-integrity carbon ecosystems'],
+      lines: ['Climate-tech company website', 'Sole end-to-end website build'],
       links: [{ label: 'LIVE SITE', href: 'https://prithu.earth/' }],
     },
     {
       label: 'ETHREAL DESIGN',
-      lines: ['Creative digital agency', 'React / TypeScript / Next.js'],
+      lines: ['Designing Company', 'React / TypeScript / Next.js'],
       links: [
         { label: 'LIVE SITE', href: 'https://etherealdesign.io/' },
       ],
@@ -3186,7 +3186,7 @@ function SectionPanel({ controller }: { controller: RideController }) {
     aria-labelledby={'section-' + portfolioStop.id}
   >
     <div className="skills-heading">
-      <p>{portfolioStop.number} / {controller.previewing ? 'DIRECT ACCESS' : portfolioStop.eyebrow}</p>
+      <p>{portfolioStop.number} / { portfolioStop.eyebrow}</p>
       <h2 id={'section-' + portfolioStop.id}>{portfolioStop.heading[0]}<br /><em>{portfolioStop.heading[1]}</em></h2>
       <span>{controller.previewing ? 'Quick view - route progress is unchanged' : 'GOING THROUGH THE RIDE'}</span>
       <p className="section-note">{portfolioStop.note}</p>

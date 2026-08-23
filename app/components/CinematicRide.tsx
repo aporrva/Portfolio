@@ -934,8 +934,10 @@ const STRAIGHTEN_RIDER_PARTS = new Set([
   'Riding thigh', 'Riding shin', 'Riding boot', 'Riding thigh.001', 'Riding shin.001', 'Riding boot.001',
 ]);
 
+const MODEL_PATH = `${process.env.NEXT_PUBLIC_BASE_PATH || ''}/models/apoorva-cafe-rider.glb`;
+
 function RideRig({ controller, drive }: { controller: RideController; drive: DriveRef }) {
-  const { scene } = useGLTF('/models/apoorva-cafe-rider.glb');
+  const { scene } = useGLTF(MODEL_PATH);
   const { camera } = useThree();
   const bikeRoot = useRef<THREE.Group>(null);
   const visual = useRef<THREE.Group>(null);
@@ -2362,4 +2364,4 @@ export default function CinematicRide() {
   </main>;
 }
 
-useGLTF.preload('/models/apoorva-cafe-rider.glb');
+useGLTF.preload(MODEL_PATH);

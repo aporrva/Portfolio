@@ -257,20 +257,20 @@ function getRoadsidePose(portfolioStop: PortfolioStop) {
   const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
   const position = point.clone().addScaledVector(side, portfolioStop.side * 7.5);
   position.y += 2.85;
-  // Angle billboard along the roadside slightly parallel to the road (running along the highway shoulder with a gentle 18° angle toward the rider)
-  const parallelAngle = portfolioStop.side * 1.24;
+  // Billboard faces oncoming traffic with a clean 22° angle facing toward the road center where the bike approaches
+  const angleTowardRoad = -portfolioStop.side * 0.38;
   return {
     position,
     tangent,
     side,
-    rotationY: Math.atan2(-tangent.x, -tangent.z) + parallelAngle,
+    rotationY: Math.atan2(-tangent.x, -tangent.z) + angleTowardRoad,
   };
 }
 
 function useRideController(): RideController {
   const initialDistance = Math.round(PORTFOLIO_STOPS[0].distance - RIDE_START_DISTANCE);
   const [mode, setMode] = useState<RideState>('intro');
-  const [countdown, setCountdown] = useState(10);
+  const [countdown, setCountdown] = useState(3);
   const [speed, setSpeed] = useState(0);
   const [vehicleSpeed, setVehicleSpeed] = useState(0);
   const [targetProgress, setTargetProgress] = useState(0);
@@ -469,28 +469,27 @@ function useRideController(): RideController {
     setPreviewing(false);
     resetChallenge(PORTFOLIO_STOPS[0].distance - RIDE_START_DISTANCE);
     reportedSpeed.current = 0;
-    setCountdown(10);
+    setCountdown(3);
     setVehicleSpeed(0);
     setSpeed(0);
     setRideReset((value) => value + 1);
     transition('countdown');
     ensureEngine();
-    sound(125, 0.1, 'square', 0.02);
+    sound(140, 0.12, 'square', 0.035);
 
     const timeline = gsap.timeline();
     mainTimeline.current = timeline;
-    for (let value = 10; value >= 0; value -= 1) {
-      const index = 10 - value;
+    for (let value = 3; value >= 0; value -= 1) {
+      const index = 3 - value;
       timeline.call(() => {
         setCountdown(value);
-        const base = value > 5 ? 220 : value > 2 ? 140 : 90;
-        sound(base + index * 18, value === 0 ? 0.5 : 0.055, value < 4 ? 'sawtooth' : 'square', value === 0 ? 0.075 : 0.026);
-      }, [], index * 0.245);
+        sound(value === 0 ? 320 : 180 + index * 40, value === 0 ? 0.45 : 0.08, value === 0 ? 'sawtooth' : 'square', value === 0 ? 0.08 : 0.04);
+      }, [], index * 0.7);
     }
     timeline.call(() => {
       transition('riding');
       setSpeed(1);
-    }, [], 2.78);
+    }, [], 2.8);
   }
 
   function registerMiss(message: string) {
@@ -2053,37 +2052,62 @@ function RouteTarget({
         <meshBasicMaterial map={subtitleTexture} transparent depthWrite={false} />
       </mesh>
 
-      {active ? <group ref={core} position={[0, 0, 0.2]}>
+      {active ? <group ref={core} position={[0, 0, 0.22]}>
+        {/* High-contrast dark circular backing plate so the glowing rings pop out intensely */}
+        <mesh position={[0, 0, -0.04]}>
+          <circleGeometry args={[1.05, 32]} />
+          <meshStandardMaterial color="#080e12" metalness={0.8} roughness={0.2} />
+        </mesh>
+
+        {/* Interactive Pointer/Click Zone */}
         <mesh position={[0, 0, 0.1]} onClick={hit} onPointerOver={lock} onPointerMove={lock} onPointerOut={unlock}>
-          <circleGeometry args={[assist ? 0.55 : 0.48, 32]} />
+          <circleGeometry args={[assist ? 0.95 : 0.85, 32]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
-        <mesh scale={vulnerable ? 1.2 : 0.95}>
-          <torusGeometry args={[0.48, 0.075, 16, 48]} />
+
+        {/* Large Outer Glowing Bullseye Ring */}
+        <mesh scale={vulnerable ? 1.2 : 1.0}>
+          <torusGeometry args={[0.78, 0.085, 16, 48]} />
           <meshStandardMaterial
-            color={vulnerable ? '#fff0a6' : '#d75c45'}
-            emissive={vulnerable ? '#ffbf4d' : '#7d2018'}
-            emissiveIntensity={vulnerable ? 3.6 : 0.8}
-            metalness={0.45}
-            roughness={0.22}
+            color={vulnerable ? '#ffe259' : '#ff3b30'}
+            emissive={vulnerable ? '#ffaa00' : '#cc1100'}
+            emissiveIntensity={vulnerable ? 5.5 : 2.5}
+            metalness={0.6}
+            roughness={0.15}
           />
         </mesh>
-        <mesh position={[0, 0, 0.03]}>
-          <circleGeometry args={[0.26, 32]} />
+
+        {/* Inner Glowing Core Ring */}
+        <mesh scale={vulnerable ? 1.15 : 0.92}>
+          <torusGeometry args={[0.45, 0.07, 16, 48]} />
           <meshStandardMaterial
-            color={vulnerable ? '#fff7ce' : '#5e2726'}
-            emissive={vulnerable ? '#ffcf62' : '#7a1616'}
-            emissiveIntensity={vulnerable ? 4.2 : 0.6}
-            roughness={0.18}
+            color={vulnerable ? '#ffffff' : '#ff7755'}
+            emissive={vulnerable ? '#ffdd44' : '#ff2211'}
+            emissiveIntensity={vulnerable ? 6.0 : 2.8}
+            metalness={0.4}
+            roughness={0.1}
           />
         </mesh>
-        <mesh rotation={[0, 0, Math.PI / 4]} scale={vulnerable ? 1.15 : 0.85}>
-          <torusGeometry args={[0.68, 0.03, 8, 4]} />
-          <meshBasicMaterial color={vulnerable ? '#fff6c7' : '#9b4339'} transparent opacity={vulnerable ? 0.92 : 0.55} />
+
+        {/* Center Glowing Bullseye Core Disc */}
+        <mesh position={[0, 0, 0.04]}>
+          <circleGeometry args={[0.24, 32]} />
+          <meshStandardMaterial
+            color={vulnerable ? '#fffce0' : '#8a1f18'}
+            emissive={vulnerable ? '#ffcc00' : '#ff3322'}
+            emissiveIntensity={vulnerable ? 6.5 : 2.0}
+            roughness={0.1}
+          />
         </mesh>
-      </group> : <group position={[0, 0, 0.2]}>
-        <mesh><torusGeometry args={[0.45, 0.05, 12, 36]} /><meshStandardMaterial color={status === 'completed' ? '#f5c978' : '#5e6e73'} emissive={status === 'completed' ? '#a36825' : '#19292e'} emissiveIntensity={status === 'completed' ? 1.5 : 0.25} /></mesh>
-        <mesh><circleGeometry args={[0.18, 28]} /><meshBasicMaterial color={status === 'completed' ? '#ffe0a2' : '#48585d'} /></mesh>
+
+        {/* Dynamic Diamond Pulse Target Frame */}
+        <mesh rotation={[0, 0, Math.PI / 4]} scale={vulnerable ? 1.25 : 0.95}>
+          <torusGeometry args={[0.95, 0.04, 8, 4]} />
+          <meshBasicMaterial color={vulnerable ? '#fff6c7' : '#ff5544'} transparent opacity={vulnerable ? 0.95 : 0.65} toneMapped={false} />
+        </mesh>
+      </group> : <group position={[0, 0, 0.22]}>
+        <mesh><torusGeometry args={[0.62, 0.06, 12, 36]} /><meshStandardMaterial color={status === 'completed' ? '#f5c978' : '#5e6e73'} emissive={status === 'completed' ? '#a36825' : '#19292e'} emissiveIntensity={status === 'completed' ? 2.5 : 0.4} /></mesh>
+        <mesh><circleGeometry args={[0.25, 28]} /><meshBasicMaterial color={status === 'completed' ? '#ffe0a2' : '#48585d'} /></mesh>
       </group>}
 
       <mesh position={[-1.85, -2.8, 0]} castShadow>

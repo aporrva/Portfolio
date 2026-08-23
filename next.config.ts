@@ -1,9 +1,10 @@
 import type { NextConfig } from 'next';
 
 const isGithubActions = process.env.GITHUB_ACTIONS || false;
+const customDomain = process.env.CUSTOM_DOMAIN || false;
 let basePath = '';
 
-if (isGithubActions) {
+if (isGithubActions && !customDomain) {
   const repo = process.env.GITHUB_REPOSITORY?.replace(/.*?\//, '') || '';
   if (repo && !repo.endsWith('.github.io')) {
     basePath = `/${repo}`;

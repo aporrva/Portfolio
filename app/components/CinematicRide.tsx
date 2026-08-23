@@ -128,6 +128,7 @@ const stop = (
   label: string,
   number: string,
   distance: number,
+  side: 1 | -1,
   signSubtitle: string,
   eyebrow: string,
   heading: [string, string],
@@ -139,7 +140,7 @@ const stop = (
   number,
   distance,
   progress: distance / ROAD_LENGTH,
-  side: -1,
+  side,
   signSubtitle,
   eyebrow,
   heading,
@@ -159,32 +160,32 @@ function getEffectiveStop(index: number, distances?: number[]): PortfolioStop | 
 }
 
 const PORTFOLIO_STOPS: PortfolioStop[] = [
-  stop('skills', 'SKILLS', '01', 90, 'UNLOCK THE TOOLKIT', 'SKILLS UNLOCKED', ['THE TOOLKIT', 'BEHIND THE RIDE.'], [
+  stop('skills', 'SKILLS', '01', 90, 1, 'UNLOCK THE TOOLKIT', 'SKILLS UNLOCKED', ['THE TOOLKIT', 'BEHIND THE RIDE.'], [
     { label: 'FRONTEND', lines: ['React', 'Next.js', 'TypeScript'] },
     { label: '3D / MOTION', lines: ['Three.js', 'React Three Fiber', 'GSAP'] },
     { label: 'BACKEND', lines: ['Node.js', 'APIs', 'Databases'] },
   ], 'A practical stack for expressive, production-ready digital products.'),
-  stop('about', 'ABOUT', '02', 180, 'MEET THE RIDER', 'RIDER PROFILE', ['DESIGN THINKING.', 'ENGINEERING DRIVE.'], [
+  stop('about', 'ABOUT', '02', 180, -1, 'MEET THE RIDER', 'RIDER PROFILE', ['DESIGN THINKING.', 'ENGINEERING DRIVE.'], [
     { label: 'PROFILE', lines: ['Full-stack developer', 'Creative technologist'] },
     { label: 'APPROACH', lines: ['Design X engineering', 'Story-led interaction'] },
     { label: 'FOCUS', lines: ['Useful products', 'Memorable interfaces'] },
   ], 'I turn ambitious ideas into clear, usable experiences with personality.'),
-  stop('experience', 'EXPERIENCE', '03', 270, 'TRACE THE JOURNEY', 'EXPERIENCE UNLOCKED', ['BUILT THROUGH', 'REAL DELIVERY.'], [
+  stop('experience', 'EXPERIENCE', '03', 270, 1, 'TRACE THE JOURNEY', 'EXPERIENCE UNLOCKED', ['BUILT THROUGH', 'REAL DELIVERY.'], [
     { label: 'ENGINEERING', lines: ['Frontend systems', 'Typed architecture'] },
     { label: 'PRODUCT', lines: ['Full-stack workflows', 'API-driven applications'] },
     { label: 'DELIVERY', lines: ['Concept to launch', 'Performance and polish'] },
   ], 'Hands-on experience across product thinking, implementation, and refinement.'),
-  stop('projects', 'PROJECTS', '04', 360, 'OPEN THE GARAGE', 'PROJECT DATABASE', ['SELECTED WORK.', 'MADE TO MOVE.'], [
+  stop('projects', 'PROJECTS', '04', 360, -1, 'OPEN THE GARAGE', 'PROJECT DATABASE', ['SELECTED WORK.', 'MADE TO MOVE.'], [
     { label: 'IMMERSIVE WEB', lines: ['3D Ride Portfolio', 'Three.js experience'] },
     { label: 'PRODUCT BUILDS', lines: ['Responsive applications', 'End-to-end workflows'] },
     { label: 'INTERACTION', lines: ['Motion systems', 'Accessible interfaces'] },
   ], 'Projects where interaction, technology, and a strong visual point of view meet.'),
-  stop('resume', 'RESUME', '05', 450, 'VIEW THE RECORD', 'RESUME UNLOCKED', ['THE ROUTE.', 'AT A GLANCE.'], [
+  stop('resume', 'RESUME', '05', 450, 1, 'VIEW THE RECORD', 'RESUME UNLOCKED', ['THE ROUTE.', 'AT A GLANCE.'], [
     { label: 'CORE', lines: ['React / TypeScript', 'Node.js / APIs'] },
     { label: 'CREATIVE', lines: ['Three.js / WebGL', 'GSAP / Motion'] },
     { label: 'PRACTICE', lines: ['Databases / Accessibility', 'Performance'] },
   ], 'A compact view of the capabilities behind the work.'),
-  stop('contact', 'CONTACT', '06', 540, 'START A CONVERSATION', 'FINAL CHECKPOINT', ["LET'S BUILD", "WHAT'S NEXT."], [
+  stop('contact', 'CONTACT', '06', 540, -1, 'START A CONVERSATION', 'FINAL CHECKPOINT', ["LET'S BUILD", "WHAT'S NEXT."], [
     { label: 'COLLABORATE', lines: ['Product experiences', 'Interactive platforms'] },
     { label: 'CONNECT', lines: ['Email', 'LinkedIn'] },
     { label: 'FOLLOW', lines: ['GitHub', 'Selected work'] },
@@ -274,7 +275,8 @@ function getRoadsidePose(portfolioStop: PortfolioStop) {
   const tangent = roadCurve.getTangentAt(portfolioStop.progress).normalize();
   const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
   const position = point.clone().addScaledVector(side, portfolioStop.side * 7.5);
-  position.y += 2.85;
+  // Elevate billboard higher up so it is completely visible above the rider and motorcycle
+  position.y += 4.15;
   // Tilt the target board at an exact 45-degree angle relative to the road, facing oncoming riders
   const angle45Deg = -portfolioStop.side * (Math.PI / 4);
   return {
@@ -1499,41 +1501,43 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       const currentAim = aimWeight.current;
       if (gunGroup) gunGroup.visible = currentAim > 0.02;
 
+      const targetSide = activeStop ? (activeStop.side ?? -1) : -1;
+
       for (const snapshot of riderOriginals) {
         snapshot.object.position.copy(snapshot.position);
         snapshot.object.quaternion.copy(snapshot.quaternion);
 
-        // One-handed driving + right arm dramatically raised & pointing gun towards target
+        // One-handed driving + right arm dramatically raised & pointing gun towards target on either Left or Right roadside
         if (currentAim > 0.001) {
           if (snapshot.object.name === 'Jacket arm.001') {
             snapshot.object.position.y += 0.48 * currentAim;
-            snapshot.object.position.z -= 0.65 * currentAim;
+            snapshot.object.position.z += targetSide * 0.65 * currentAim;
             snapshot.object.position.x += 0.35 * currentAim;
             snapshot.object.rotation.z += 0.72 * currentAim;
-            snapshot.object.rotation.y -= 0.95 * currentAim;
+            snapshot.object.rotation.y += targetSide * 0.95 * currentAim;
           } else if (snapshot.object.name === 'Gloved forearm.001') {
             snapshot.object.position.y += 0.78 * currentAim;
-            snapshot.object.position.z -= 1.15 * currentAim;
+            snapshot.object.position.z += targetSide * 1.15 * currentAim;
             snapshot.object.position.x += 0.55 * currentAim;
             snapshot.object.rotation.z += 0.62 * currentAim;
-            snapshot.object.rotation.y -= 1.22 * currentAim;
+            snapshot.object.rotation.y += targetSide * 1.22 * currentAim;
           } else if (snapshot.object.name === 'Glove.001') {
             snapshot.object.position.y += 0.92 * currentAim + (isLaserShooting ? recoilKick * 0.14 : 0);
-            snapshot.object.position.z -= 1.55 * currentAim;
+            snapshot.object.position.z += targetSide * 1.55 * currentAim;
             snapshot.object.position.x += 0.72 * currentAim - (isLaserShooting ? recoilKick * 0.28 : 0);
             snapshot.object.rotation.z += 0.48 * currentAim - (isLaserShooting ? recoilKick * 0.45 : 0);
-            snapshot.object.rotation.y -= 1.45 * currentAim;
+            snapshot.object.rotation.y += targetSide * 1.45 * currentAim;
           }
         }
       }
 
-      // Upper torso and helmet turn towards the target when aiming
+      // Upper torso and helmet turn towards the target side when aiming
       if (torsoObj && currentAim > 0.001) {
-        torsoObj.rotation.y = -0.45 * currentAim;
-        torsoObj.rotation.z = -0.1 * currentAim;
+        torsoObj.rotation.y = targetSide * 0.45 * currentAim;
+        torsoObj.rotation.z = targetSide * 0.1 * currentAim;
       }
       if (helmetGroup && currentAim > 0.001) {
-        helmetGroup.rotation.y = -0.68 * currentAim;
+        helmetGroup.rotation.y = targetSide * 0.68 * currentAim;
         helmetGroup.rotation.x = -0.12 * currentAim;
       }
     }
@@ -1821,26 +1825,27 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       const isAiming = controller.mode === 'aiming' || controller.mode === 'shot';
       const isTarget = controller.mode === 'target';
 
-      if (isAiming) {
-        // Dramatic close-up over-the-left-shoulder combat camera:
-        // Positioned 2.35m behind her left shoulder, framing the rider's helmet, raised right arm, and sidearm weapon in the foreground
-        // with the 45-degree angled billboard directly down her sightline on the right!
-        const cameraBack = 2.35;
-        const cameraSide = 1.35;
-        const cameraHeight = 1.65;
+      if (isAiming && activeStop) {
+        // Dramatic close-up over-shoulder combat camera:
+        // Positioned behind the rider, framing helmet, raised sidearm, and elevated target
+        const stopSide = activeStop.side ?? -1;
+        const cameraBack = 2.45;
+        const cameraSide = -stopSide * 1.45;
+        const cameraHeight = 1.85;
         desiredCamera.copy(point).addScaledVector(tangent, -(cameraBack - (braking ? 0.2 : 0))).addScaledVector(side, cameraSide);
         desiredCamera.y = point.y + cameraHeight - (braking ? 0.05 : 0);
 
-        // Frame the sightline from her gun barrel directly out to the roadside billboard
-        const aimCenter = signFocus.clone().lerp(point.clone().addScaledVector(tangent, 3.2), 0.22);
+        // Frame the sightline from weapon directly out to the elevated roadside billboard
+        const aimCenter = signFocus.clone().lerp(point.clone().addScaledVector(tangent, 3.2), 0.2);
         desiredLook.copy(aimCenter);
-      } else if (isTarget) {
-        const cameraBack = 3.6;
-        const cameraSide = 1.75;
-        const cameraHeight = 1.82;
+      } else if (isTarget && activeStop) {
+        const stopSide = activeStop.side ?? -1;
+        const cameraBack = 3.8;
+        const cameraSide = -stopSide * 1.75;
+        const cameraHeight = 2.05;
         desiredCamera.copy(point).addScaledVector(tangent, -cameraBack).addScaledVector(side, cameraSide);
         desiredCamera.y = point.y + cameraHeight;
-        desiredLook.copy(signFocus).lerp(point.clone().addScaledVector(tangent, 3.8), 0.25);
+        desiredLook.copy(signFocus).lerp(point.clone().addScaledVector(tangent, 3.8), 0.22);
       } else {
         const lookAhead = THREE.MathUtils.lerp(5.5, 10.5, speed01);
         const cameraBack = THREE.MathUtils.lerp(7.6, 9.5, speed01);
@@ -2151,12 +2156,12 @@ function RouteTarget({
         <mesh><circleGeometry args={[0.25, 28]} /><meshBasicMaterial color={status === 'completed' ? '#ffe0a2' : '#48585d'} /></mesh>
       </group>}
 
-      <mesh position={[-1.85, -2.8, 0]} castShadow>
-        <cylinderGeometry args={[0.11, 0.14, 3.4, 12]} />
+      <mesh position={[-1.85, -3.7, 0]} castShadow>
+        <cylinderGeometry args={[0.12, 0.15, 5.2, 12]} />
         <meshStandardMaterial color="#3a4145" metalness={0.78} roughness={0.35} />
       </mesh>
-      <mesh position={[1.85, -2.8, 0]} castShadow>
-        <cylinderGeometry args={[0.11, 0.14, 3.4, 12]} />
+      <mesh position={[1.85, -3.7, 0]} castShadow>
+        <cylinderGeometry args={[0.12, 0.15, 5.2, 12]} />
         <meshStandardMaterial color="#3a4145" metalness={0.78} roughness={0.35} />
       </mesh>
     </group>

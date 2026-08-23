@@ -264,12 +264,12 @@ stop(
   [
     {
       label: 'PRITHU.EARTH',
-      lines: ['Climate-tech company website', 'Sole end-to-end website build', 'High-integrity carbon ecosystems'],
+      lines: ['Climate-tech company website', 'Sole end-to-end website build'],
       links: [{ label: 'LIVE SITE', href: 'https://prithu.earth/' }],
     },
     {
       label: 'ETHREAL DESIGN',
-      lines: ['Creative digital agency', 'React / TypeScript / Next.js'],
+      lines: ['Designing Company', 'React / TypeScript / Next.js'],
       links: [
         { label: 'LIVE SITE', href: 'https://etherealdesign.io/' },
       ],

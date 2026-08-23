@@ -2729,10 +2729,16 @@ function SectionPanel({ controller }: { controller: RideController }) {
       <span>{controller.previewing ? 'Quick view - route progress is unchanged' : 'World speed reduced to 20%'}</span>
       <p className="section-note">{portfolioStop.note}</p>
     </div>
-    <div className="skills-columns">
+    <div className={'skills-columns group-count-' + portfolioStop.groups.length}>
       {portfolioStop.groups.map((group) => <article key={group.label}>
         <b>{group.label}</b>
         <p>{group.lines.map((line, index) => <span key={line}>{line}{index < group.lines.length - 1 && <br />}</span>)}</p>
+        {group.links && <div className="skills-links">
+          {group.links.map((link) => {
+            const opensNewTab = link.href.startsWith('http');
+            return <a key={link.href} href={link.href} target={opensNewTab ? '_blank' : undefined} rel={opensNewTab ? 'noreferrer' : undefined}>{link.label} <span aria-hidden="true">?</span></a>;
+          })}
+        </div>}
       </article>)}
     </div>
     <div className="skills-footer">
@@ -2884,8 +2890,12 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
       {mode === 'finale' && showFinale && <motion.section className="finale-overlay" initial={{ opacity: 0, y: 28 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1.1, ease: [0.16, 1, 0.3, 1] }} aria-labelledby="summit-title">
         <p className="finale-kicker">SUMMIT / JOURNEY COMPLETE</p>
         <h2 id="summit-title">THE VIEW<br />AFTER THE CLIMB.</h2>
-        <p className="finale-copy">Apoorva Rawat is a full-stack developer crafting interactive digital experiences where thoughtful engineering meets a strong visual point of view.</p>
-        <div className="finale-links" aria-label="Contact channels"><span>EMAIL</span><span>LINKEDIN</span><span>GITHUB</span></div>
+        <p className="finale-copy">Apoorva Rawat is a full-stack developer working across React, React Native, Node.js, and responsive product interfaces - currently with Prithu and independently delivering client websites.</p>
+        <div className="finale-links" aria-label="Contact channels">
+          <a href="mailto:apoorvarawat87@gmail.com">EMAIL</a>
+          <a href="https://github.com/aporrva" target="_blank" rel="noreferrer">GITHUB</a>
+          <a href="https://prithu.earth/" target="_blank" rel="noreferrer">PRITHU.EARTH</a>
+        </div>
         <div className="finale-actions">
           <button type="button" onClick={() => window.location.reload()}>RESTART RIDE</button>
           <button type="button" onClick={() => setMenuOpen(true)}>VIEW SECTIONS</button>

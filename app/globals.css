@@ -215,8 +215,12 @@ button { cursor: pointer; }
 .skills-heading h2 { margin: 0; font-family: Georgia, 'Times New Roman', serif; font-size: clamp(32px, 4.1vw, 67px); font-weight: 400; line-height: .84; letter-spacing: -.065em; }
 .skills-heading h2 em { color: #f1aa64; font-weight: 400; }.skills-heading > span { display: block; margin-top: 19px; color: rgba(244, 241, 230, .58); font-size: 8px; font-weight: 600; }
 .skills-columns { display: grid; grid-template-columns: repeat(3, 1fr); align-self: end; gap: 1px; border-left: 1px solid rgba(236, 239, 230, .22); }
+.skills-columns.group-count-4 { grid-template-columns: repeat(2, 1fr); }
 .skills-columns article { min-height: 135px; padding: 13px 16px; border-right: 1px solid rgba(236, 239, 230, .22); background: linear-gradient(180deg, rgba(13, 38, 48, .33), transparent); }
 .skills-columns b { color: var(--gold); font-size: 8px; }.skills-columns p { margin: 18px 0 0; color: var(--paper); font-family: Georgia, 'Times New Roman', serif; font-size: clamp(13px, 1.4vw, 20px); line-height: 1.27; letter-spacing: -.02em; text-transform: none; }
+.skills-links { display: flex; flex-wrap: wrap; gap: 7px 11px; margin-top: 13px; }
+.skills-links a { color: var(--gold); border-bottom: 1px solid rgba(246, 200, 122, .42); font-size: 7px; font-weight: 800; letter-spacing: .12em; text-decoration: none; transition: color .2s ease, border-color .2s ease; }
+.skills-links a:hover, .skills-links a:focus-visible { color: #fff1c7; border-color: #fff1c7; }
 .skills-footer { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding-right: clamp(22px, 3vw, 42px); color: rgba(244, 241, 230, .62); font-size: 8px; font-weight: 700; }
 
 @keyframes target-lock-pulse { from { transform: translate(-50%, -50%) scale(.94); } to { transform: translate(-50%, -50%) scale(1.06); } }
@@ -332,7 +336,7 @@ button { cursor: pointer; }
   .skills-heading h2 {
     font-size: clamp(28px, 7vw, 42px);
   }
-  .skills-columns {
+  .skills-columns, .skills-columns.group-count-4 {
     grid-template-columns: 1fr;
     margin-right: 0;
     gap: 8px;

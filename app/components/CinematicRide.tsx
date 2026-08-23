@@ -257,13 +257,13 @@ function getRoadsidePose(portfolioStop: PortfolioStop) {
   const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
   const position = point.clone().addScaledVector(side, portfolioStop.side * 7.5);
   position.y += 2.85;
-  // Billboard faces oncoming traffic with a clean 22° angle facing toward the road center where the bike approaches
-  const angleTowardRoad = -portfolioStop.side * 0.38;
+  // Tilt the target board at an exact 45-degree angle relative to the road, facing oncoming riders
+  const angle45Deg = -portfolioStop.side * (Math.PI / 4);
   return {
     position,
     tangent,
     side,
-    rotationY: Math.atan2(-tangent.x, -tangent.z) + angleTowardRoad,
+    rotationY: Math.atan2(-tangent.x, -tangent.z) + angle45Deg,
   };
 }
 
@@ -1139,9 +1139,9 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     const rightGlove = riderGroup.getObjectByName('Glove.001');
     const gunGroup = new THREE.Group();
     gunGroup.name = 'RiderGun';
-    gunGroup.position.set(0.12, -0.02, 0.07);
+    gunGroup.position.set(0.14, -0.02, 0.08);
     gunGroup.rotation.set(0.14, -0.15, 0.08);
-    gunGroup.scale.set(1.85, 1.85, 1.85);
+    gunGroup.scale.set(2.2, 2.2, 2.2);
 
     const gunBody = new THREE.Mesh(
       new THREE.BoxGeometry(0.3, 0.14, 0.07),
@@ -1774,24 +1774,25 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       const isTarget = controller.mode === 'target';
 
       if (isAiming) {
-        // Heroic over-the-left-shoulder cinematic tracking camera:
-        // Positioned left-rear so her extended right arm, the metallic sidearm, and the huge roadside target billboard ahead are crystal clear
-        const cameraBack = 3.9;
-        const cameraSide = 3.0;
-        const cameraHeight = 1.95;
-        desiredCamera.copy(point).addScaledVector(tangent, -(cameraBack - (braking ? 0.3 : 0))).addScaledVector(side, cameraSide);
-        desiredCamera.y = point.y + cameraHeight - (braking ? 0.1 : 0);
+        // Dramatic close-up over-the-left-shoulder combat camera:
+        // Positioned 2.35m behind her left shoulder, framing the rider's helmet, raised right arm, and sidearm weapon in the foreground
+        // with the 45-degree angled billboard directly down her sightline on the right!
+        const cameraBack = 2.35;
+        const cameraSide = 1.35;
+        const cameraHeight = 1.65;
+        desiredCamera.copy(point).addScaledVector(tangent, -(cameraBack - (braking ? 0.2 : 0))).addScaledVector(side, cameraSide);
+        desiredCamera.y = point.y + cameraHeight - (braking ? 0.05 : 0);
 
-        // Frame the sightline from her gun out towards the giant roadside billboard
-        const aimCenter = signFocus.clone().lerp(point.clone().addScaledVector(tangent, 3.2), 0.18);
+        // Frame the sightline from her gun barrel directly out to the roadside billboard
+        const aimCenter = signFocus.clone().lerp(point.clone().addScaledVector(tangent, 3.2), 0.22);
         desiredLook.copy(aimCenter);
       } else if (isTarget) {
-        const cameraBack = 5.2;
-        const cameraSide = 2.6;
-        const cameraHeight = 2.05;
+        const cameraBack = 3.6;
+        const cameraSide = 1.75;
+        const cameraHeight = 1.82;
         desiredCamera.copy(point).addScaledVector(tangent, -cameraBack).addScaledVector(side, cameraSide);
         desiredCamera.y = point.y + cameraHeight;
-        desiredLook.copy(signFocus).lerp(point.clone().addScaledVector(tangent, 4.0), 0.28);
+        desiredLook.copy(signFocus).lerp(point.clone().addScaledVector(tangent, 3.8), 0.25);
       } else {
         const lookAhead = THREE.MathUtils.lerp(5.5, 10.5, speed01);
         const cameraBack = THREE.MathUtils.lerp(7.6, 9.5, speed01);

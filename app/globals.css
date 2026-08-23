@@ -429,6 +429,9 @@ button { cursor: pointer; }
 .route-menu-status { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: #a56b58; font-size: 7px; font-weight: 800; letter-spacing: .12em; white-space: nowrap; }
 .route-menu > button.is-complete .route-menu-status { color: #778583; }
 .route-menu > button.is-active .route-menu-status { color: #b84935; }
+.route-menu > button.route-menu-restart { color: #913a2f; }
+.route-menu > button.route-menu-restart:hover { color: #c34b38; }
+.route-menu > button.route-menu-restart .route-menu-status { color: #913a2f; }
 
 .route-rail .route-count { color: rgba(224, 233, 230, .66); font-size: 7px; font-weight: 800; letter-spacing: .14em; writing-mode: vertical-rl; transform: rotate(180deg); }
 .section-note { max-width: 52ch; margin: 16px 0 0; color: rgba(239, 243, 235, .62); font-size: 9px; font-weight: 500; line-height: 1.65; letter-spacing: .04em; text-transform: none; }
@@ -436,6 +439,7 @@ button { cursor: pointer; }
 .finale-overlay { position: absolute; z-index: 4; bottom: clamp(72px, 10vh, 118px); left: clamp(70px, 9vw, 148px); width: min(590px, calc(100vw - 140px)); padding: clamp(24px, 3vw, 38px) clamp(24px, 3.5vw, 46px); color: var(--paper); border-top: 1px solid rgba(246, 200, 122, .64); border-left: 1px solid rgba(246, 200, 122, .64); background: linear-gradient(100deg, rgba(4, 14, 20, .72) 0%, rgba(4, 14, 20, .48) 62%, rgba(4, 14, 20, .12) 100%); box-shadow: 0 24px 70px rgba(0, 0, 0, .18); backdrop-filter: blur(9px); pointer-events: auto; }
 .finale-kicker { margin: 0 0 13px; color: var(--gold); font-size: 8px; font-weight: 800; letter-spacing: .18em; }
 .finale-overlay h2 { max-width: 560px; margin: 0; font-family: Georgia, 'Times New Roman', serif; font-size: clamp(42px, 5.6vw, 78px); font-weight: 400; line-height: .84; letter-spacing: -.06em; }
+.finale-overlay h2 em { color: #f1aa64; font-weight: 400; }
 .finale-copy { max-width: 48ch; margin: 19px 0 0; color: rgba(242, 244, 236, .75); font-size: clamp(11px, 1vw, 14px); font-weight: 400; line-height: 1.65; letter-spacing: .025em; text-transform: none; }
 .finale-links { display: flex; flex-wrap: wrap; gap: 9px 18px; margin-top: 20px; }
 .finale-links a, .finale-links span { padding: 6px 0; color: var(--paper); border-bottom: 1px solid rgba(246, 200, 122, .52); font-size: 8px; font-weight: 800; letter-spacing: .14em; text-decoration: none; transition: color .2s ease, border-color .2s ease; }
@@ -443,3 +447,6 @@ button { cursor: pointer; }
 .finale-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 23px; }
 .finale-actions button, .finale-actions a { display: inline-flex; min-height: 38px; align-items: center; justify-content: center; padding: 11px 15px; color: #101b20; border: 1px solid var(--gold); background: var(--gold); font-size: 8px; font-weight: 800; letter-spacing: .13em; text-decoration: none; transition: color .2s ease, background .2s ease, transform .2s ease; }
 .finale-actions button:hover, .finale-actions a:hover { color: var(--paper); background: rgba(6, 18, 24, .64); transform: translateY(-2px); }
+.finale-actions button b { margin-left: 8px; font-size: 14px; font-weight: 400; }
+.finale-actions button.finale-menu-action { color: var(--paper); background: rgba(6, 18, 24, .54); }
+.finale-actions button.finale-menu-action:hover { color: #101b20; background: var(--gold); }

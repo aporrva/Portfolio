@@ -66,6 +66,7 @@ type RideController = {
   activeStop: PortfolioStop | null;
   panelStop: PortfolioStop | null;
   previewing: boolean;
+  previewReturnMode: RideState;
 };
 
 type DriveRuntime = {
@@ -177,9 +178,9 @@ const PORTFOLIO_STOPS: PortfolioStop[] = [
     'RIDER PROFILE',
     ['DESIGN THINKING.', 'ENGINEERING DRIVE.'],
     [
-      { label: 'PROFILE', lines: ['Full-stack developer', 'Freelance web developer'] },
-      { label: 'SPECIALISM', lines: ['React & React Native', 'Node.js & responsive UI'] },
-      { label: 'BACKGROUND', lines: ['B.Sc. Mathematics (PCM)', 'Chemistry teacher, 2023-2025'] },
+      { label: 'PROFILE', lines: ['Full-stack Software Engineer', 'Freelance Software Engineer', "App developer", "Web Developer"] },
+      { label: 'SPECIALISM', lines: ['React', 'React Native', 'Node.js' , 'django'] },
+      
     ],
     'I build production-ready web experiences and bring the communication, problem-solving, and mentorship skills of a former teacher.'
   ),
@@ -756,6 +757,19 @@ function useRideController(): RideController {
 
   function continueRide() {
     if (modeRef.current !== 'reading' && modeRef.current !== 'shot') return;
+    if (previewingRef.current) {
+      killTimelines();
+      previewingRef.current = false;
+      setPreviewing(false);
+      setPanelIndex(null);
+      transition(returnModeRef.current);
+      setSpeed(returnSpeedRef.current);
+      if (returnSpeedRef.current === 0) {
+        reportedSpeed.current = 0;
+        setVehicleSpeed(0);
+      }
+      return;
+    }
     killTimelines();
     const currentQueue = targetQueueRef.current;
     if (currentQueue.length === 0) return;
@@ -811,7 +825,12 @@ function useRideController(): RideController {
 
   function openSection(index: number) {
     if (index < 0 || index >= PORTFOLIO_STOPS.length) return;
-    if (modeRef.current === 'countdown' || modeRef.current === 'shot' || modeRef.current === 'reading') return;
+    if (modeRef.current === 'countdown' || modeRef.current === 'shot') return;
+    if (modeRef.current === 'reading') {
+      if (!previewingRef.current) return;
+      setPanelIndex(index);
+      return;
+    }
     killTimelines();
     returnModeRef.current = modeRef.current;
     returnSpeedRef.current = modeRef.current === 'intro' || modeRef.current === 'finale' ? 0 : 1;
@@ -922,6 +941,7 @@ function useRideController(): RideController {
     activeStop: getEffectiveStop(activeIndex, stopDistances),
     panelStop: panelIndex === null ? null : getEffectiveStop(panelIndex, stopDistances),
     previewing,
+    previewReturnMode: returnModeRef.current,
   };
 }
 
@@ -2226,8 +2246,8 @@ function RideRig({
     let terminalBraking = false;
     if (controller.mode === 'summit') {
       desiredVelocity = Math.max(0.52, CRUISE_SPEED + (1 - CRUISE_SPEED) * throttle);
-      if (summitRemaining < 20) {
-        const summitLimit = THREE.MathUtils.lerp(0.03, 0.58, THREE.MathUtils.clamp(summitRemaining / 20, 0, 1));
+      if (summitRemaining < 18) {
+        const summitLimit = THREE.MathUtils.lerp(0.12, 0.58, THREE.MathUtils.clamp(summitRemaining / 18, 0, 1));
         desiredVelocity = Math.min(desiredVelocity, summitLimit);
       }
       if (summitRemaining <= 0.8) {
@@ -2877,7 +2897,7 @@ function SectionPanel({ controller }: { controller: RideController }) {
   const portfolioStop = controller.panelStop;
   if (!portfolioStop) return null;
   const actionLabel = controller.previewing
-    ? 'RETURN TO RIDE'
+    ? controller.previewReturnMode === 'finale' ? 'RETURN TO SUMMIT' : 'RETURN TO RIDE'
     : portfolioStop.id === 'contact'
       ? 'RIDE TO SUMMIT'
       : 'CONTINUE RIDE';
@@ -2921,13 +2941,15 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
   const [showFinale, setShowFinale] = useState(false);
 
   useEffect(() => {
-    if (mode !== 'finale') {
-      setShowFinale(false);
-      return;
+    if (mode === 'finale') {
+      if (showFinale) return;
+      const timer = window.setTimeout(() => setShowFinale(true), 3800);
+      return () => window.clearTimeout(timer);
     }
-    const timer = window.setTimeout(() => setShowFinale(true), 3800);
-    return () => window.clearTimeout(timer);
-  }, [mode]);
+    if (!(mode === 'reading' && controller.previewing && controller.previewReturnMode === 'finale')) {
+      setShowFinale(false);
+    }
+  }, [mode, controller.previewing, controller.previewReturnMode, showFinale]);
 
   const driving = mode === 'riding' || mode === 'target' || mode === 'aiming' || mode === 'summit';
   const playState = mode === 'intro' ? 'READY' : mode === 'countdown' ? 'START' : mode === 'finale' ? 'FINALE' : mode === 'summit' ? 'SUMMIT' : mode === 'reading' ? 'READING' : mode === 'shot' ? 'HIT' : 'CRUISE';
@@ -2942,6 +2964,13 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
       ? 'FINAL ASCENT'
       : activeStop?.label ?? 'SUMMIT';
   const routeNumber = mode === 'finale' || mode === 'summit' ? '06' : activeStop?.number ?? '06';
+  const journeyComplete = controller.completedCount === PORTFOLIO_STOPS.length;
+
+  const restartJourney = () => {
+    setMenuOpen(false);
+    setShowFinale(false);
+    begin();
+  };
 
   const hold = (control: 'forward' | 'brake' | 'left' | 'right', active: boolean) => {
     drive.current[control] = active;
@@ -2961,17 +2990,19 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
       {PORTFOLIO_STOPS.map((portfolioStop, index) => {
         const complete = controller.completedStops.includes(index);
         const active = index === controller.activeIndex && mode !== 'summit' && mode !== 'finale';
+        const selected = mode === 'reading' && controller.previewing && controller.panelStop?.id === portfolioStop.id;
         return <button
           key={portfolioStop.id}
-          className={complete ? 'is-complete' : active ? 'is-active' : ''}
+          className={[complete && 'is-complete', (active || selected) && 'is-active'].filter(Boolean).join(' ')}
           type="button"
+          aria-current={selected ? 'page' : undefined}
           onClick={() => {
             setMenuOpen(false);
             controller.openSection(index);
           }}
         >
           <span>{portfolioStop.number} / {portfolioStop.label}</span>
-          <i className="route-menu-status">{complete ? 'UNLOCKED' : active ? 'ON ROUTE' : 'QUICK VIEW'}</i>
+          <i className="route-menu-status">{selected ? 'VIEWING' : complete ? 'UNLOCKED' : active ? 'ON ROUTE' : 'QUICK VIEW'}</i>
         </button>;
       })}
       <button
@@ -2984,6 +3015,10 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
       >
         <span>★ / SUMMIT FINALE</span>
         <i className="route-menu-status">{mode === 'finale' ? 'ACTIVE' : 'PLAY FINALE'}</i>
+      </button>
+      <button className="route-menu-restart" type="button" onClick={restartJourney}>
+        <span>↺ / RESTART JOURNEY</span>
+        <i className="route-menu-status">FROM START</i>
       </button>
     </motion.nav>}</AnimatePresence>
 
@@ -3050,9 +3085,28 @@ function Hud({ controller, drive }: { controller: RideController; drive: DriveRe
         {mode === 'aiming' && misses >= 2 && <small className="aim-assist">AIM CALIBRATED</small>}
       </motion.section>}
 
-      {mode === 'reading' && <SectionPanel controller={controller} />}
+      {mode === 'reading' && <SectionPanel key={controller.panelStop?.id ?? 'section'} controller={controller} />}
 
       {mode === 'finale' && !showFinale && <motion.p className="finale-sequence" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>KICKSTAND DOWN / SUMMIT VIEW</motion.p>}
+
+      {mode === 'finale' && showFinale && <motion.section
+        className="finale-overlay"
+        initial={{ opacity: 0, y: 24 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 18 }}
+        transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+        aria-labelledby="finale-title"
+      >
+        <p className="finale-kicker">{journeyComplete ? 'JOURNEY COMPLETE / ' + PORTFOLIO_STOPS.length + ' CHECKPOINTS' : 'SUMMIT PREVIEW / DIRECT ACCESS'}</p>
+        <h2 id="finale-title">THE SUMMIT.<br /><em>YOUR NEXT MOVE.</em></h2>
+        <p className="finale-copy">{journeyComplete
+          ? 'Every portfolio card is unlocked. Open the menu and choose any card to revisit it; the detail panel will update to match each selection.'
+          : 'Explore any portfolio card from the menu, or restart the journey and unlock every checkpoint on the road.'}</p>
+        <div className="finale-actions">
+          <button className="finale-menu-action" type="button" onClick={() => setMenuOpen(true)}>EXPLORE CARDS <b>+</b></button>
+          <button type="button" onClick={restartJourney}>RESTART JOURNEY <b>↺</b></button>
+        </div>
+      </motion.section>}
     </AnimatePresence>
 
     {(mode === 'target' || mode === 'aiming') && <div className={'crosshair-3d' + (targetVulnerable && aimLocked ? ' is-hot' : '')} aria-hidden="true"><i /></div>}

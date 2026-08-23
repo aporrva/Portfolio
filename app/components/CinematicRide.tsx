@@ -1027,9 +1027,6 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
   const bikeRoot = useRef<THREE.Group>(null);
   const visual = useRef<THREE.Group>(null);
   const kickstand = useRef<THREE.Group>(null);
-  const tracerGroup = useRef<THREE.Group>(null);
-  const tracerMesh = useRef<THREE.Mesh>(null);
-  const tracerGlowMesh = useRef<THREE.Mesh>(null);
   const tracerImpact = useRef<THREE.Mesh>(null);
   const point = useMemo(() => new THREE.Vector3(), []);
   const tangent = useMemo(() => new THREE.Vector3(), []);
@@ -1284,18 +1281,7 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
   const rearWheel = useMemo(() => model.getObjectByName('RearWheelSpin'), [model]);
   const frontWheel = useMemo(() => model.getObjectByName('FrontWheelSpin'), [model]);
 
-  // Cylinder geometry aligned along Z axis for laser beam
-  const tracerBeamGeometry = useMemo(() => {
-    const geom = new THREE.CylinderGeometry(0.042, 0.042, 1, 8);
-    geom.rotateX(Math.PI / 2);
-    return geom;
-  }, []);
 
-  const tracerGlowGeometry = useMemo(() => {
-    const geom = new THREE.CylinderGeometry(0.09, 0.09, 1, 8);
-    geom.rotateX(Math.PI / 2);
-    return geom;
-  }, []);
 
   useFrame(({ clock }, rawDelta) => {
     const delta = Math.min(rawDelta, 0.05);
@@ -1691,41 +1677,19 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       muzzleFlash.scale.setScalar(THREE.MathUtils.lerp(2.8, 0.4, THREE.MathUtils.clamp(timeSinceShot / 0.35, 0, 1)));
     }
 
-    if (tracerGroup.current && isLaserShooting && activeStop) {
+    if (tracerImpact.current && isLaserShooting && activeStop) {
       const targetPose = getRoadsidePose(activeStop);
       const targetWorld = targetPose.position.clone();
       targetWorld.y += 0.05;
 
-      const totalDist = muzzleWorldPos.distanceTo(targetWorld);
-      
-      // Fast bullet projectile flight (0.0s to 0.16s flight time from gun muzzle to billboard)
-      const flightProgress = THREE.MathUtils.clamp(timeSinceShot / 0.16, 0, 1);
-      const bulletHead = new THREE.Vector3().lerpVectors(muzzleWorldPos, targetWorld, flightProgress);
-      // Trail stretches behind the bullet from muzzle up to a max trail length of 7.5m
-      const trailLength = Math.min(totalDist * flightProgress, 7.5);
-      const trailStart = bulletHead.clone().addScaledVector(bulletHead.clone().sub(muzzleWorldPos).normalize(), -trailLength);
-      
-      const segmentMid = new THREE.Vector3().lerpVectors(trailStart, bulletHead, 0.5);
-      const segmentLen = Math.max(trailStart.distanceTo(bulletHead), 0.2);
-
-      tracerGroup.current.visible = true;
-      tracerGroup.current.position.copy(segmentMid);
-      tracerGroup.current.lookAt(targetWorld);
-      tracerGroup.current.scale.set(1, 1, segmentLen);
-
-      const fade = Math.max(0, 1 - timeSinceShot / 0.45);
-      if (tracerMesh.current) (tracerMesh.current.material as THREE.MeshBasicMaterial).opacity = fade * 0.98;
-      if (tracerGlowMesh.current) (tracerGlowMesh.current.material as THREE.MeshBasicMaterial).opacity = fade * 0.65;
-      
-      if (tracerImpact.current) {
-        tracerImpact.current.visible = flightProgress >= 0.75;
-        tracerImpact.current.position.copy(targetWorld);
-        const impactScale = flightProgress >= 0.75 ? THREE.MathUtils.lerp(0.5, 2.5, (timeSinceShot - 0.12) / 0.25) : 0;
-        tracerImpact.current.scale.setScalar(Math.max(0, impactScale));
-        (tracerImpact.current.material as THREE.MeshBasicMaterial).opacity = fade * (flightProgress >= 0.75 ? 0.9 : 0);
-      }
+      tracerImpact.current.visible = true;
+      tracerImpact.current.position.copy(targetWorld);
+      const impactProgress = THREE.MathUtils.clamp(timeSinceShot / 0.42, 0, 1);
+      const impactScale = THREE.MathUtils.lerp(0.8, 3.8, impactProgress);
+      tracerImpact.current.scale.setScalar(impactScale);
+      const fade = Math.max(0, 1 - impactProgress);
+      (tracerImpact.current.material as THREE.MeshBasicMaterial).opacity = fade * 0.95;
     } else {
-      if (tracerGroup.current) tracerGroup.current.visible = false;
       if (tracerImpact.current) tracerImpact.current.visible = false;
     }
 
@@ -1868,18 +1832,10 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
       </group>
     </group>
 
-    {/* Dynamic Laser Tracer Beam fired from Gun in Girl's hand to Target */}
-    <group ref={tracerGroup} visible={false}>
-      <mesh ref={tracerMesh} geometry={tracerBeamGeometry}>
-        <meshBasicMaterial color="#ffffff" transparent opacity={0.98} toneMapped={false} />
-      </mesh>
-      <mesh ref={tracerGlowMesh} geometry={tracerGlowGeometry}>
-        <meshBasicMaterial color="#ffaa22" transparent opacity={0.65} toneMapped={false} />
-      </mesh>
-    </group>
+    {/* Instant Target Hit Flash on Billboard Core */}
     <mesh ref={tracerImpact} visible={false}>
-      <sphereGeometry args={[0.38, 16, 16]} />
-      <meshBasicMaterial color="#ffe882" transparent opacity={0.9} toneMapped={false} />
+      <sphereGeometry args={[0.55, 24, 24]} />
+      <meshBasicMaterial color="#fff3b0" transparent opacity={0.95} toneMapped={false} />
     </mesh>
   </>;
 }

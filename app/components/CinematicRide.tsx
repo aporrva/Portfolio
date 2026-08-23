@@ -1657,31 +1657,35 @@ function RideRig({ controller, drive }: { controller: RideController; drive: Dri
     runtime.hasLastPosition = true;
     runtime.wheelAngle += distanceTravelled / WHEEL_RADIUS_WORLD;
 
-    const lookAheadPos = runtime.progress + (8 / ROAD_LENGTH);
-    const lookAheadClamped = THREE.MathUtils.clamp(lookAheadPos, 0, 1);
-    const targetPoint = roadCurve.getPointAt(lookAheadClamped);
-    const targetTangent = roadCurve.getTangentAt(lookAheadClamped).normalize();
+    roadCurve.getTangentAt(Math.min(runtime.progress + 0.012, 1), tangentAhead).normalize();
+    const turnAngle = Math.atan2(
+      tangent.z * tangentAhead.x - tangent.x * tangentAhead.z,
+      THREE.MathUtils.clamp(tangent.dot(tangentAhead), -1, 1),
+    );
+    const curvature = turnAngle / (ROAD_LENGTH * 0.012);
+    const actualSpeed = runtime.velocity * ROUTE_TOP_SPEED * timeScale;
+    const curveLean = -Math.atan((actualSpeed * actualSpeed * curvature) / 9.81);
+    const steeringLean = runtime.steer * runtime.velocity * (0.05 + runtime.velocity * 0.12);
+    const leanTarget = terminalScene
+      ? 0.085 * parkingStand
+      : THREE.MathUtils.clamp(curveLean + steeringLean, -0.46, 0.46);
 
-    const roadCurvature = tangent.x * targetTangent.z - tangent.z * targetTangent.x;
-    const steerRoll = -runtime.steer * 0.28;
-    const curveRoll = -roadCurvature * runtime.velocity * 0.42;
-    const targetRoll = THREE.MathUtils.clamp(steerRoll + curveRoll, -0.42, 0.42);
+    heading.copy(tangent).addScaledVector(side, runtime.steer * 0.08).normalize();
+    frameSide.crossVectors(heading, worldUp).normalize();
+    frameUp.crossVectors(frameSide, heading).normalize();
+    frameMatrix.makeBasis(heading, frameUp, frameSide);
+    pathQuaternion.setFromRotationMatrix(frameMatrix);
 
-    const pitchSlope = Math.atan2(tangent.y, Math.sqrt(tangent.x * tangent.x + tangent.z * tangent.z));
-    const accelPitch = -runtime.acceleration * 0.042;
-    const targetPitch = THREE.MathUtils.clamp(pitchSlope + accelPitch, -0.28, 0.28);
-
-    bikeRoot.current?.position.copy(point);
     if (bikeRoot.current) {
-      bikeRoot.current.position.y += floorOffset;
-      bikeRoot.current.rotation.y = Math.atan2(-tangent.x, -tangent.z);
+      bikeRoot.current.position.set(point.x, point.y + floorOffset, point.z);
+      bikeRoot.current.quaternion.slerp(pathQuaternion, 1 - Math.exp(-delta * (10.5 + runtime.velocity * 3)));
     }
 
     if (visual.current) {
-      const parkingLean = terminalScene ? -0.12 * parkingStand : 0;
-      visual.current.rotation.z = THREE.MathUtils.damp(visual.current.rotation.z, targetRoll + parkingLean, 7.5, delta);
-      visual.current.rotation.x = THREE.MathUtils.damp(visual.current.rotation.x, targetPitch, 7.5, delta);
-      visual.current.rotation.y = THREE.MathUtils.damp(visual.current.rotation.y, runtime.steer * 0.09, 8.0, delta);
+      visual.current.rotation.x = THREE.MathUtils.damp(visual.current.rotation.x, leanTarget, 6.8, delta);
+      const pitchTarget = terminalScene ? 0 : THREE.MathUtils.clamp(runtime.acceleration * 0.032, -0.055, 0.032);
+      visual.current.rotation.z = THREE.MathUtils.damp(visual.current.rotation.z, pitchTarget, braking ? 10 : 5.5, delta);
+      visual.current.position.y = THREE.MathUtils.damp(visual.current.position.y, 0, 10, delta);
     }
     if (kickstand.current) {
       kickstand.current.rotation.x = THREE.MathUtils.lerp(-0.18, -0.42, parkingStand);
